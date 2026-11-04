@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  agterm-kit (`agk`) is a Go CLI that integrates coding-agent workflows (Claude Code + codex)
+  with agterm, a native macOS terminal, through its `agtermctl` control-socket CLI.
+
+  Tech stack: Go 1.26, standard library only where possible (flag, html/template, embed,
+  os/exec, encoding/json). External binaries: `agtermctl` (agterm 0.40+), `codex` (codex-cli
+  0.166+, `codex exec --output-schema`), `git`.
+
+  agterm concepts: sessions, terminal companions (`session new --parent`), page companions,
+  HTML overlays (`session overlay open --html --js --block`) whose page can call the control
+  socket via `agterm.request()`, sidebar status glyphs (`session status`) and info lines
+  (`session info`), `session wait --until`.
+
+  Conventions: every external command goes through an interface with a fake for tests; codex
+  output is untrusted and is rendered only via html/template with a strict CSP; commands fall
+  back to plain terminal output when AGTERM_ENABLED is unset.
+
+operations:
+  apply:
+    guidance:
+      - >-
+        Implementation is not done when the tasks are checked. After the last task: run the quality
+        gates, then the codex review of the diff until clean, then /opsx:verify (openspec-verify-change)
+        right away, without asking. The change is not complete until verify reports 0 CRITICAL.
+      - >-
+        Verify CRITICAL is a blocker: fix it, run a codex review of the fix, then rerun verify.
+        WARNING: fix it or reject it with a stated reason. SUGGESTION: optional.
+  archive:
+    guidance:
+      - >-
+        Precondition: /opsx:verify must have passed with 0 CRITICAL after the last codex review.
+        If it has not, run verify now and do not archive until it is clean.

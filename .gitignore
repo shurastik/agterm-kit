@@ -5,3 +5,17 @@
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Build
+.bin/
+/agk
+*.test
+
+# Run artifacts
+.agk/
+
+# Worktrees
+.worktrees/
+
+# OS
+.DS_Store

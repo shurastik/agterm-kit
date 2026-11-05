@@ -17,7 +17,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "agk:", err)
 		os.Exit(cli.ExitError)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	code := env.Main(ctx, os.Args[1:])
 	stop()
 	os.Exit(code)

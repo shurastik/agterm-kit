@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/shurastik/agterm-kit/assets"
 )
@@ -24,10 +26,19 @@ type Runner interface {
 // sending combined stdout and stderr to out. A non-zero exit is an error.
 type StreamExec func(ctx context.Context, name string, args []string, dir string, env []string, stdin io.Reader, out io.Writer) error
 
-// RunStreaming is the real StreamExec.
+// waitDelay bounds how long RunStreaming waits for output pipes after the
+// process exits or is cancelled.
+const waitDelay = 5 * time.Second
+
+// RunStreaming is the real StreamExec. The process runs in its own process
+// group, and cancellation terminates the whole group: the npm codex wrapper
+// spawns the native binary, which would otherwise keep the pipes open.
 func RunStreaming(ctx context.Context, name string, args []string, dir string, env []string, stdin io.Reader, out io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, env, stdin, out, out
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = waitDelay
 	return cmd.Run()
 }
 

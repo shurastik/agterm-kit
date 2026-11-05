@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shurastik/agterm-kit/assets"
 )
@@ -75,5 +76,29 @@ func TestCodexRunFailure(t *testing.T) {
 	logb, _ := os.ReadFile(filepath.Join(dir, "codex.log"))
 	if !strings.Contains(string(logb), "auth error") {
 		t.Fatal("failure output must still be logged")
+	}
+}
+
+// A grandchild that inherits stdout (the npm codex wrapper spawning the native
+// binary) must not keep RunStreaming alive after cancellation.
+func TestRunStreamingCancelKillsProcessGroup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- RunStreaming(ctx, "sh", []string{"-c", "(sleep 30; echo late) & echo started; wait"}, t.TempDir(), os.Environ(), strings.NewReader(""), &out)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled run must return an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunStreaming still blocked 5s after cancel")
+	}
+	if strings.Contains(out.String(), "late") {
+		t.Fatal("grandchild survived")
 	}
 }

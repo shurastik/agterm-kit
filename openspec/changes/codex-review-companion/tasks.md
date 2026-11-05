@@ -13,12 +13,12 @@
 
 ## 3. Review core
 
-- [ ] 3.1 Embed `assets/review-output.schema.json` (copied from the codex plugin) and implement `review.Parse` per design D6; tests cover valid output, invalid JSON, bad severity/verdict, missing required field, unknown field, line < 1, confidence outside [0,1], plus an enum-parity test against the embedded schema; `go test ./internal/review/` passes
-- [ ] 3.2 Implement git scope collection (merge base of `--base`, working-tree diff, untracked non-ignored files as pseudo-diffs, binary/oversize files by name only, empty-scope error `nothing to review`); tests use temporary git repos covering branch commits + uncommitted edit + untracked file, ignored file excluded, and clean tree
-- [ ] 3.3 Implement the embedded prompt template and diff cap (stat kept, note to read files past the cap); tests assert the diff and untracked content land in the prompt and that an oversize diff is truncated with the note
-- [ ] 3.4 Implement run-dir creation `.agk/reviews/<YYYYMMDD-HHMMSS>[-N]/` under the repo root with atomic collision suffix; test two runs at the same fake time get distinct dirs
-- [ ] 3.5 Implement `review.Runner` invoking `codex exec -s read-only -C <root> --ephemeral --output-schema <dir>/review-output.schema.json -o <dir>/codex-output.json -` with the prompt on stdin and output tee'd to `codex.log`; test exact argv, stdin content and log file via an injected exec func
-- [ ] 3.6 Implement info-line formatting per design D7; tests cover `codex: 3 findings (1 high)`, `codex: approve, no findings` and a failure reason
+- [x] 3.1 Embed `assets/review-output.schema.json` (copied from the codex plugin) and implement `review.Parse` per design D6; tests cover valid output, invalid JSON, bad severity/verdict, missing required field, unknown field, line < 1, confidence outside [0,1], plus an enum-parity test against the embedded schema; `go test ./internal/review/` passes
+- [x] 3.2 Implement git scope collection (merge base of `--base`, working-tree diff, untracked non-ignored files as pseudo-diffs, binary/oversize files by name only, empty-scope error `nothing to review`); tests use temporary git repos covering branch commits + uncommitted edit + untracked file, ignored file excluded, and clean tree
+- [x] 3.3 Implement the embedded prompt template and diff cap (stat kept, note to read files past the cap); tests assert the diff and untracked content land in the prompt and that an oversize diff is truncated with the note
+- [x] 3.4 Implement run-dir creation `.agk/reviews/<YYYYMMDD-HHMMSS>[-N]/` under the repo root with atomic collision suffix; test two runs at the same fake time get distinct dirs
+- [x] 3.5 Implement `review.Runner` invoking `codex exec -s read-only -C <root> --ephemeral --output-schema <dir>/review-output.schema.json -o <dir>/codex-output.json -` with the prompt on stdin and output tee'd to `codex.log`; test exact argv, stdin content and log file via an injected exec func
+- [x] 3.6 Implement info-line formatting per design D7; tests cover `codex: 3 findings (1 high)`, `codex: approve, no findings` and a failure reason
 
 ## 4. `agk review` commands
 

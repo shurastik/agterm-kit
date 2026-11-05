@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -100,5 +102,38 @@ func TestRunStreamingCancelKillsProcessGroup(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "late") {
 		t.Fatal("grandchild survived")
+	}
+}
+
+// A descendant that ignores SIGTERM must still be killed after the grace period.
+func TestRunStreamingCancelEscalatesToSIGKILL(t *testing.T) {
+	old := killGrace
+	killGrace = 200 * time.Millisecond
+	defer func() { killGrace = old }()
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		script := `(trap '' TERM; exec sleep 30) & echo $! > '` + pidFile + `'; wait`
+		done <- RunStreaming(ctx, "sh", []string{"-c", script}, t.TempDir(), os.Environ(), strings.NewReader(""), io.Discard)
+	}()
+	var pid int
+	for i := 0; i < 50 && pid == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 {
+		t.Fatal("grandchild pid not written")
+	}
+	cancel()
+	<-done
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatal("SIGTERM-ignoring descendant still alive")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -26,11 +26,11 @@ session, and hands back structured findings plus the user's per-finding decision
 
 2. **Wait** in the background (Bash `run_in_background: true`), never poll:
    ```bash
-   "${AGTERMCTL:-/Applications/agterm.app/Contents/MacOS/agtermctl}" session wait \
-     --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked
+   A="${AGTERMCTL:-/Applications/agterm.app/Contents/MacOS/agtermctl}"; [ -x "$A" ] || A=agtermctl
+   "$A" session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked
    ```
-   (Same binary `agk` uses: `$AGTERMCTL`, else the app bundle; plain `agtermctl` only if neither
-   exists. `agtermctl` ignores `$AGTERM_SOCKET` unless it is passed as `--socket`.)
+   (Same binary order as `agk`: `$AGTERMCTL`, the app bundle, then `agtermctl` on PATH.
+   `agtermctl` ignores `$AGTERM_SOCKET` unless it is passed as `--socket`.)
    - prints `completed`: findings are in `<dir>/review.json`.
    - prints `blocked`: the review failed. Read `<dir>/codex.log` (and `<dir>/codex-output.json` if
      present), tell the user the reason, fix the cause if it is on our side, and restart at step 1.

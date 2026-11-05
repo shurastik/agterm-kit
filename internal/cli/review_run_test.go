@@ -32,9 +32,9 @@ func TestReviewRunFindings(t *testing.T) {
 	}
 	want := []agtermtest.Call{
 		{Method: "Status", Args: []string{"SELF", "active"}},
-		{Method: "Info", Args: []string{"SELF", review.ReviewingLine}},
+		{Method: "Info", Args: []string{"SELF", "codex #1: reviewing"}},
 		{Method: "Status", Args: []string{"SELF", "completed"}},
-		{Method: "Info", Args: []string{"SELF", `codex: **3** findings (^[1 high](color: "orange"))`}},
+		{Method: "Info", Args: []string{"SELF", `codex #1: **3** findings (^[1 high](color: "orange"))`}},
 	}
 	if !reflect.DeepEqual(h.ctl.Calls, want) {
 		t.Fatalf("ctl calls = %v", h.ctl.Calls)
@@ -109,7 +109,7 @@ func TestReviewRunBadDir(t *testing.T) {
 	if code := h.env.ReviewRun(context.Background(), []string{t.TempDir()}); code == 0 {
 		t.Fatal("dir outside .agk/reviews must be rejected")
 	}
-	assertBlocked(t, h, review.ReasonSetupFailed)
+	assertBlockedN(t, h, 0, review.ReasonSetupFailed)
 }
 
 func TestReviewRunOutsideAgterm(t *testing.T) {
@@ -126,13 +126,18 @@ func TestReviewRunOutsideAgterm(t *testing.T) {
 
 func assertBlocked(t *testing.T, h *harness, reason string) {
 	t.Helper()
+	assertBlockedN(t, h, 1, reason)
+}
+
+func assertBlockedN(t *testing.T, h *harness, num int, reason string) {
+	t.Helper()
 	n := len(h.ctl.Calls)
 	if n < 2 {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
 	want := []agtermtest.Call{
 		{Method: "Status", Args: []string{"SELF", "blocked"}},
-		{Method: "Info", Args: []string{"SELF", review.FailureLine(reason)}},
+		{Method: "Info", Args: []string{"SELF", review.FailureLine(num, reason)}},
 	}
 	if !reflect.DeepEqual(h.ctl.Calls[n-2:], want) {
 		t.Fatalf("last calls = %v, want %v", h.ctl.Calls[n-2:], want)
@@ -152,5 +157,34 @@ func TestReviewRunReportsBlockedAfterCancel(t *testing.T) {
 	n := len(h.ctl.CtxErrs)
 	if h.ctl.CtxErrs[n-2] != nil || h.ctl.CtxErrs[n-1] != nil {
 		t.Fatalf("final status sent with a cancelled context: %v", h.ctl.CtxErrs)
+	}
+}
+
+func TestReviewRunUsesItsOwnNumber(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := runDir(t) // 20261105-100000 -> #1
+	later := filepath.Join(root, ".agk", "reviews", "20261105-110000")
+	os.MkdirAll(later, 0o755)
+	os.WriteFile(filepath.Join(later, "prompt.md"), []byte("P"), 0o644)
+	h.runner.output = threeFindings
+	if code := h.env.ReviewRun(context.Background(), []string{later}); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got := h.ctl.Calls[1].Args[1]; got != "codex #2: reviewing" {
+		t.Fatalf("info = %q", got)
+	}
+}
+
+func TestReviewRunPrintsTimestampedHeader(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := runDir(t)
+	h.runner.output = threeFindings
+	h.env.ReviewRun(context.Background(), []string{dir})
+	first := strings.SplitN(h.out.String(), "\n", 2)[0]
+	if want := "[2026-11-05 10:00:00] agk: review #1 started, run dir " + dir; first != want {
+		t.Fatalf("header = %q, want %q", first, want)
+	}
+	if !strings.Contains(h.out.String(), "[2026-11-05 10:00:00] agk: review #1: 3 finding(s)") {
+		t.Fatalf("footer missing:\n%s", h.out)
 	}
 }

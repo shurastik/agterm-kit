@@ -22,7 +22,7 @@ func TestCodexRun(t *testing.T) {
 	var gotName, gotDir, gotStdin string
 	var gotArgs []string
 	var gotEnv []string
-	c := &Codex{Bin: "codex", Environ: func() []string {
+	c := &Codex{Bin: "codex", Now: fixedNow, Environ: func() []string {
 		return []string{"PATH=/bin", "AGTERM_SESSION_ID=C", "AGTERM_ENABLED=1", "AGTERM_SOCKET=/s", "HOME=/h"}
 	}, Exec: func(_ context.Context, name string, args []string, wd string, env []string, stdin io.Reader, out io.Writer) error {
 		gotName, gotArgs, gotDir, gotEnv = name, args, wd, env
@@ -49,11 +49,11 @@ func TestCodexRun(t *testing.T) {
 	if gotStdin != "PROMPT" {
 		t.Fatalf("stdin = %q", gotStdin)
 	}
-	if term.String() != "thinking...\n" {
+	if term.String() != "[2026-11-05 17:53:55] thinking...\n" {
 		t.Fatalf("terminal = %q", term.String())
 	}
 	logb, _ := os.ReadFile(filepath.Join(dir, "codex.log"))
-	if string(logb) != "thinking...\n" {
+	if string(logb) != "[2026-11-05 17:53:55] thinking...\n" {
 		t.Fatalf("codex.log = %q", logb)
 	}
 	schema, _ := os.ReadFile(filepath.Join(dir, "review-output.schema.json"))

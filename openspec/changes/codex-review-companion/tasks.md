@@ -26,6 +26,8 @@
 - [x] 4.2 Implement `agk review start [--base]` inside agterm (scope check before any agterm call, run dir + `prompt.md`, `NewCompanion` with absolute `os.Executable()` path and shell-quoted args, JSON `{"companion","dir"}` on stdout); tests assert no `Ctl` call on empty scope and exact companion argv otherwise
 - [x] 4.3 Implement the outside-agterm path of `review start` (inline run, no `Ctl` calls, `{"companion": null, "dir": ...}`, exit code mirrors the run); test with `AGTERM_ENABLED` unset
 - [x] 4.4 Wire `cmd/agk/main.go` dispatch with usage text and exit codes 0/1/2/3; verify `go build ./cmd/agk` and `agk --help`, `agk review --help` output
+- [x] 4.5 Implement review numbering (position of the run dir among `.agk/reviews/*`, stable for the run): companion name `codex-review #N`, info lines `codex #N: …`; tests cover numbering, a later run not renumbering an earlier one, and the exact companion name and info lines
+- [x] 4.6 Implement the timestamped review log: header line `agk: review #N started, run dir <dir>` and a `[YYYY-MM-DD HH:MM:SS] ` prefix on every line in the companion terminal and `codex.log`; tests cover partial writes, multi-line chunks and the header
 
 ## 5. `agk triage`
 

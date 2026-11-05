@@ -66,7 +66,7 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	// The caller's PATH is pinned so codex and agtermctl resolve inside the
 	// companion even when agterm starts it without a login shell.
 	wantCmd := fmt.Sprintf("env 'PATH=/opt/homebrew/bin:/usr/bin' '/usr/local/bin/agk' review run '%s'", dir)
-	if got := h.ctl.Calls[0].Args; !reflect.DeepEqual(got, []string{"SELF", "codex-review", wantCmd, root}) {
+	if got := h.ctl.Calls[0].Args; !reflect.DeepEqual(got, []string{"SELF", "codex-review #1", wantCmd, root}) {
 		t.Fatalf("companion args = %q", got)
 	}
 	var out struct {

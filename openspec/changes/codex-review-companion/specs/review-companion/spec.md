@@ -39,27 +39,27 @@ Each review SHALL get a new run directory `.agk/reviews/<timestamp>/` under the 
 - **THEN** each has its own run directory and neither overwrites the other's files
 
 ### Requirement: Companion session inside agterm
-When `AGTERM_ENABLED` and `AGTERM_SESSION_ID` are set, `agk review start` SHALL create a terminal companion of the current session named `codex-review`, in the background without changing the selected session, running the review, and SHALL print one JSON object `{"companion": "<id>", "dir": "<run dir>"}` on stdout and exit 0 without waiting for the review.
+When `AGTERM_ENABLED` and `AGTERM_SESSION_ID` are set, `agk review start` SHALL create a terminal companion of the current session named `codex-review #<N>` (N is the review number), in the background without changing the selected session, running the review, and SHALL print one JSON object `{"companion": "<id>", "dir": "<run dir>"}` on stdout and exit 0 without waiting for the review.
 
 #### Scenario: Companion appears under the agent session
 - **GIVEN** the agent runs inside agterm session S
 - **WHEN** it runs `agk review start --base main`
-- **THEN** a session named `codex-review` appears as a companion under S, S stays selected, and stdout is a JSON object with the companion id and the absolute run directory
+- **THEN** a session named `codex-review #<N>` appears as a companion under S, S stays selected, and stdout is a JSON object with the companion id and the absolute run directory
 
 #### Scenario: Companion stays visible after the review
 - **WHEN** the review inside the companion finishes, successfully or not
 - **THEN** the companion session stays open showing the review output until the user dismisses it or its parent closes
 
 ### Requirement: Progress and outcome status
-The review process SHALL report through the companion's agterm status: `active` with info line `codex: reviewing` while running; `completed` with an info line counting findings by severity on success; `blocked` with an info line stating the failure reason on any failure.
+The review process SHALL report through the companion's agterm status: `active` with info line `codex #<N>: reviewing` while running; `completed` with an info line counting findings by severity on success; `blocked` with an info line stating the failure reason on any failure.
 
 #### Scenario: Findings reported
 - **WHEN** codex returns 3 findings, one of them `high`
-- **THEN** the companion status becomes `completed` and its info line reads `codex: 3 findings (1 high)`
+- **THEN** the companion status becomes `completed` and its info line reads `codex #<N>: 3 findings (1 high)`
 
 #### Scenario: Clean review
 - **WHEN** codex returns verdict `approve` with no findings
-- **THEN** the companion status becomes `completed` and its info line reads `codex: approve, no findings`
+- **THEN** the companion status becomes `completed` and its info line reads `codex #<N>: approve, no findings`
 
 #### Scenario: Codex fails
 - **WHEN** the codex process exits non-zero or cannot be started
@@ -69,6 +69,25 @@ The review process SHALL report through the companion's agterm status: `active` 
 - **GIVEN** a review started with `agk review start`
 - **WHEN** the agent runs `agtermctl session wait --target <companion> --until completed --until blocked`
 - **THEN** the wait returns once the review has finished, with the matched status
+
+### Requirement: Review numbering
+Each review SHALL have a number N: the 1-based position of its run directory among the run directories of the repository, ordered by creation time. The number SHALL stay the same for the whole run.
+
+#### Scenario: Numbers count up per repository
+- **GIVEN** a repository with seven earlier run directories under `.agk/reviews/`
+- **WHEN** a review is started
+- **THEN** it is review #8: the companion is named `codex-review #8` and its info lines start with `codex #8:`
+
+#### Scenario: Later runs do not renumber earlier ones
+- **WHEN** another review is started while review #8 is still running
+- **THEN** the running review keeps number 8 in its status updates and the new one is #9
+
+### Requirement: Timestamped review log
+The review process SHALL print a header line with the review number, start date and time and run directory, and SHALL prefix every output line, in the companion terminal and in `codex.log`, with the local date and time `[YYYY-MM-DD HH:MM:SS]`.
+
+#### Scenario: Log lines carry date and time
+- **WHEN** codex prints `thinking` and then `done` during review #3 started at 2026-11-05 17:53:55
+- **THEN** the first line reads `[2026-11-05 17:53:55] agk: review #3 started, run dir <dir>` and each codex line is shown as `[<date> <time>] thinking` and `[<date> <time>] done`, both on screen and in `codex.log`
 
 ### Requirement: Read-only codex run with structured output
 The review SHALL run codex non-interactively with a read-only sandbox in the repository root, constrained to the bundled review output schema (verdict, summary, findings with severity/title/body/file/line range/confidence/recommendation, next steps).

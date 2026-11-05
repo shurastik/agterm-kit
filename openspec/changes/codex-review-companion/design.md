@@ -57,7 +57,7 @@ Prompt on stdin; stdout and stderr tee'd to the companion terminal and `<dir>/co
 `review.Parse` decodes with `DisallowUnknownFields` into typed structs and checks enums (verdict, severity), required non-empty strings, `line_start/line_end >= 1`, `confidence` in [0,1]. This mirrors the bundled schema; a test loads the embedded schema and asserts the Go-side enums match it so they cannot drift silently. Valid output is re-encoded to `review.json`; invalid output stays as `codex-output.json` and the run is `blocked` with `invalid review output`.
 
 ### D7. Status and info lines
-`active` + `codex: reviewing` (with `--hide-after 0`), then `completed` + `codex: N findings (k critical, m high)` (only non-zero critical/high counts named) or `codex: approve, no findings`, or `blocked` + `codex: <reason>`. Severity counts use info markdown color (`critical`/`high` red/orange). The info line is plain enough that the spec scenarios match its visible text. Each status update runs on a context detached from the review's (`context.WithoutCancel` + 5 s timeout), so a run cancelled by Ctrl-C or SIGTERM still reports `blocked` instead of leaving `session wait` hanging on `active` (review finding).
+Every line is labelled with the review number N (`codex #N:`); the companion is named `codex-review #N`. N is the 1-based position of the run dir among `.agk/reviews/*` sorted by timestamp then collision suffix, recomputed by `run` from its own dir, so a later run never renumbers an earlier one and no counter file is needed. `active` + `codex: reviewing` (with `--hide-after 0`), then `completed` + `codex: N findings (k critical, m high)` (only non-zero critical/high counts named) or `codex: approve, no findings`, or `blocked` + `codex: <reason>`. Severity counts use info markdown color (`critical`/`high` red/orange). The info line is plain enough that the spec scenarios match its visible text. Each status update runs on a context detached from the review's (`context.WithoutCancel` + 5 s timeout), so a run cancelled by Ctrl-C or SIGTERM still reports `blocked` instead of leaving `session wait` hanging on `active` (review finding).
 
 ### D8. Triage page: server-rendered form, inert data, nonce CSP
 `triage.Render` produces one self-contained HTML file (`<dir>/triage.html`) from an embedded `html/template` with inline CSS and JS:
@@ -80,6 +80,9 @@ Alternative considered: passing findings as JSON into the script and rendering c
 
 ### D12. Skill
 `skill/agterm-codex-review/SKILL.md`, installed by symlink into `~/.claude/skills/`. It tells the agent: run `agk review start --base <base>`; wait with a background `agtermctl session wait --target <companion> --until completed --until blocked`; on `blocked` read `codex.log` and report; on `completed` run `agk triage <dir>/review.json`; then fix `fix` items, raise `discuss` items in chat with their notes, ignore `skip`; re-run until approve. On triage exit 3 use `AskUserQuestion`; on exit 2 ask in chat. `agk` itself is installed with `go install ./cmd/agk`.
+
+### D13. Timestamped log
+`review.StampWriter` prefixes each line with `[YYYY-MM-DD HH:MM:SS] ` (local time, taken when the line starts, correct across partial writes). `Codex.Run` wraps the combined terminal + `codex.log` stream with it; `run` prints a stamped header `agk: review #N started, run dir <dir>` and a stamped summary line. exec funnels codex stdout and stderr through one pipe when they share a writer, so the stamp writer sees no concurrent writes.
 
 ## Risks / Trade-offs
 

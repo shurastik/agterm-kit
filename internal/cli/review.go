@@ -44,7 +44,7 @@ func (r reporter) set(ctx context.Context, state, line string) {
 func (e *Env) ReviewRun(ctx context.Context, args []string) int {
 	rep := reporter{env: e, target: e.session()}
 	if len(args) != 1 {
-		rep.set(ctx, "blocked", review.FailureLine(review.ReasonSetupFailed))
+		rep.set(ctx, "blocked", review.FailureLine(0, review.ReasonSetupFailed))
 		return e.errorf("usage: agk review run <run-dir>")
 	}
 	return e.runReview(ctx, args[0], e.Stdout, rep)
@@ -52,8 +52,9 @@ func (e *Env) ReviewRun(ctx context.Context, args []string) int {
 
 // runReview runs codex for a prepared run dir and records the outcome.
 func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep reporter) int {
+	num := 0 // review number; 0 until known
 	fail := func(reason string, err error) int {
-		rep.set(ctx, "blocked", review.FailureLine(reason))
+		rep.set(ctx, "blocked", review.FailureLine(num, reason))
 		return e.errorf("%s: %v", reason, err)
 	}
 	dir, err := filepath.Abs(dir)
@@ -64,11 +65,16 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
+	if num, err = review.RunNumber(dir); err != nil {
+		return fail(review.ReasonSetupFailed, err)
+	}
 	prompt, err := os.ReadFile(filepath.Join(dir, "prompt.md"))
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	rep.set(ctx, "active", review.ReviewingLine)
+	stamped := review.NewStampWriter(term, e.Now)
+	fmt.Fprintf(stamped, "agk: review #%d started, run dir %s\n", num, dir)
+	rep.set(ctx, "active", review.ReviewingLine(num))
 	if err := e.Runner.Run(ctx, root, dir, string(prompt), term); err != nil {
 		return fail(review.ReasonCodexFailed, err)
 	}
@@ -87,8 +93,9 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err := os.WriteFile(filepath.Join(dir, "review.json"), append(b, '\n'), 0o644); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	rep.set(ctx, "completed", review.SummaryLine(r))
-	fmt.Fprintf(term, "\nagk: %d finding(s), verdict %s -> %s\n", len(r.Findings), r.Verdict, filepath.Join(dir, "review.json"))
+	rep.set(ctx, "completed", review.SummaryLine(num, r))
+	fmt.Fprintf(review.NewStampWriter(term, e.Now), "agk: review #%d: %d finding(s), verdict %s -> %s\n",
+		num, len(r.Findings), r.Verdict, filepath.Join(dir, "review.json"))
 	return ExitOK
 }
 
@@ -105,7 +112,7 @@ func runRoot(dir string) (string, error) {
 // forwardedEnv lists the caller variables the companion command carries.
 var forwardedEnv = []string{"PATH", "CODEX_HOME"}
 
-// CompanionName is the sidebar name of the review companion.
+// CompanionName is the sidebar name of the review companion, suffixed " #N".
 const CompanionName = "codex-review"
 
 type startResult struct {
@@ -187,7 +194,12 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	id, err := e.Ctl.NewCompanion(ctx, parent, CompanionName, cmdExe+" review run "+cmdDir, scope.Root)
+	num, err := review.RunNumber(dir)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	name := fmt.Sprintf("%s #%d", CompanionName, num)
+	id, err := e.Ctl.NewCompanion(ctx, parent, name, cmdExe+" review run "+cmdDir, scope.Root)
 	if err != nil {
 		return e.errorf("start companion: %v", err)
 	}

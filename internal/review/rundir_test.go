@@ -34,3 +34,32 @@ func TestNewRunDir(t *testing.T) {
 		}
 	}
 }
+
+func TestRunNumber(t *testing.T) {
+	root := t.TempDir()
+	t0 := time.Date(2026, 11, 5, 9, 0, 0, 0, time.Local)
+	var dirs []string
+	for i := 0; i < 3; i++ {
+		d, err := NewRunDir(root, t0.Add(time.Duration(i)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dirs = append(dirs, d)
+	}
+	same, _ := NewRunDir(root, t0.Add(2*time.Minute)) // collision suffix -2 sorts after its base
+	os.WriteFile(filepath.Join(root, ".agk", "reviews", ".DS_Store"), nil, 0o644)
+	for i, d := range append(dirs, same) {
+		n, err := RunNumber(d)
+		if err != nil || n != i+1 {
+			t.Errorf("RunNumber(%s) = %d, %v; want %d", filepath.Base(d), n, err, i+1)
+		}
+	}
+	// A newer run does not renumber an older one.
+	NewRunDir(root, t0.Add(time.Hour))
+	if n, _ := RunNumber(dirs[1]); n != 2 {
+		t.Errorf("older run renumbered to %d", n)
+	}
+	if _, err := RunNumber(filepath.Join(root, ".agk", "reviews", "missing")); err == nil {
+		t.Error("unknown dir must error")
+	}
+}

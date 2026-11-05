@@ -94,10 +94,13 @@ type Codex struct {
 	Bin     string
 	Exec    StreamExec
 	Environ func() []string
+	Now     func() time.Time // clock for log line stamps
 }
 
 // NewCodex returns a Codex runner using codex from PATH.
-func NewCodex() *Codex { return &Codex{Bin: "codex", Exec: RunStreaming, Environ: os.Environ} }
+func NewCodex() *Codex {
+	return &Codex{Bin: "codex", Exec: RunStreaming, Environ: os.Environ, Now: time.Now}
+}
 
 // childEnv drops agterm identity so codex's own agterm status hooks stay
 // silent: only agk may set the companion's status, after validating output.
@@ -112,6 +115,13 @@ func childEnv(env []string) []string {
 }
 
 var _ Runner = (*Codex)(nil)
+
+func (c *Codex) clock() func() time.Time {
+	if c.Now == nil {
+		return time.Now
+	}
+	return c.Now
+}
 
 // OutputPath is where codex writes its final message.
 func (c *Codex) OutputPath(dir string) string { return filepath.Join(dir, "codex-output.json") }
@@ -128,7 +138,7 @@ func (c *Codex) Run(ctx context.Context, root, dir, prompt string, term io.Write
 	defer logf.Close()
 	args := []string{"exec", "-s", "read-only", "-C", root, "--ephemeral",
 		"--output-schema", schema, "-o", c.OutputPath(dir), "-"}
-	if err := c.Exec(ctx, c.Bin, args, root, childEnv(c.Environ()), strings.NewReader(prompt), io.MultiWriter(term, logf)); err != nil {
+	if err := c.Exec(ctx, c.Bin, args, root, childEnv(c.Environ()), strings.NewReader(prompt), NewStampWriter(io.MultiWriter(term, logf), c.clock())); err != nil {
 		return fmt.Errorf("codex failed: %w", err)
 	}
 	return nil

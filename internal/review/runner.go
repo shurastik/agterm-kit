@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,20 +31,43 @@ type StreamExec func(ctx context.Context, name string, args []string, dir string
 // process exits or is cancelled.
 const waitDelay = 5 * time.Second
 
-// killGrace is how long the process group gets after SIGTERM before SIGKILL.
-var killGrace = 3 * time.Second
+// interruptGrace is how long codex gets to handle SIGINT (interrupt the turn
+// and clean up its tool processes, which run in their own sessions) before
+// SIGTERM. killGrace is how long the group then gets before SIGKILL.
+var (
+	interruptGrace = 5 * time.Second
+	killGrace      = 3 * time.Second
+)
 
 // RunStreaming is the real StreamExec. The process runs in its own process
-// group, and cancellation terminates the whole group (SIGTERM, then SIGKILL
-// after killGrace): the npm codex wrapper spawns the native binary, which
-// would otherwise keep the pipes open.
+// group. Cancellation first sends SIGINT, which codex handles by interrupting
+// the turn and cleaning up its tool processes (they live in separate sessions
+// that only codex can reach); then SIGTERM after interruptGrace, and SIGKILL
+// after killGrace. The npm codex wrapper spawns the native binary, so the
+// whole group is signalled, not just the direct child.
 func RunStreaming(ctx context.Context, name string, args []string, dir string, env []string, stdin io.Reader, out io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, env, stdin, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	var (
+		mu       sync.Mutex
+		escalate *time.Timer
+	)
+	cmd.Cancel = func() error {
+		pgid := cmd.Process.Pid
+		mu.Lock()
+		// Safe as a timer: it only matters while Run is still blocked.
+		escalate = time.AfterFunc(interruptGrace, func() { _ = syscall.Kill(-pgid, syscall.SIGTERM) })
+		mu.Unlock()
+		return syscall.Kill(-pgid, syscall.SIGINT)
+	}
 	cmd.WaitDelay = waitDelay
 	err := cmd.Run()
+	mu.Lock()
+	if escalate != nil {
+		escalate.Stop()
+	}
+	mu.Unlock()
 	if ctx.Err() != nil && cmd.Process != nil {
 		// Synchronous on purpose: agk exits right after, so a timer would die with it.
 		stopGroup(cmd.Process.Pid, killGrace)

@@ -84,6 +84,7 @@ func TestCodexRunFailure(t *testing.T) {
 // A grandchild that inherits stdout (the npm codex wrapper spawning the native
 // binary) must not keep RunStreaming alive after cancellation.
 func TestRunStreamingCancelKillsProcessGroup(t *testing.T) {
+	shortGraces(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var out bytes.Buffer
 	done := make(chan error, 1)
@@ -107,9 +108,7 @@ func TestRunStreamingCancelKillsProcessGroup(t *testing.T) {
 
 // A descendant that ignores SIGTERM must still be killed after the grace period.
 func TestRunStreamingCancelEscalatesToSIGKILL(t *testing.T) {
-	old := killGrace
-	killGrace = 200 * time.Millisecond
-	defer func() { killGrace = old }()
+	shortGraces(t)
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -142,9 +141,8 @@ func TestRunStreamingCancelEscalatesToSIGKILL(t *testing.T) {
 // shell dies; the group must still be dead by the time RunStreaming returns,
 // because agk exits right after and an async timer would die with it.
 func TestRunStreamingStopsGroupBeforeReturning(t *testing.T) {
-	old := killGrace
+	shortGraces(t)
 	killGrace = time.Second
-	defer func() { killGrace = old }()
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -172,4 +170,50 @@ func TestRunStreamingStopsGroupBeforeReturning(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// Codex runs tool commands in their own Unix sessions, outside our process
+// group; only codex itself can clean them up, and it does so on SIGINT
+// (turn interrupt). Cancellation must therefore interrupt before it terminates.
+func TestRunStreamingInterruptsBeforeTerminating(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	script := `perl -MPOSIX -e 'POSIX::setsid(); exec "sleep", "30"' >/dev/null 2>&1 &
+child=$!
+echo $child > '` + pidFile + `'
+trap 'kill $child; exit 130' INT
+trap 'exit 143' TERM
+wait`
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunStreaming(ctx, "sh", []string{"-c", script}, t.TempDir(), os.Environ(), strings.NewReader(""), io.Discard)
+	}()
+	var pid int
+	for i := 0; i < 50 && pid == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 {
+		t.Fatal("tool pid not written")
+	}
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	time.Sleep(100 * time.Millisecond) // let the traps install
+	cancel()
+	<-done
+	deadline := time.Now().Add(time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("tool process in its own session survived cancellation")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// shortGraces shrinks the cancellation grace periods for a test.
+func shortGraces(t *testing.T) {
+	t.Helper()
+	oi, ok := interruptGrace, killGrace
+	interruptGrace, killGrace = 200*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { interruptGrace, killGrace = oi, ok })
 }

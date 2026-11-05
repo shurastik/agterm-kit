@@ -34,6 +34,8 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return ExitOK
 	case "review":
 		return e.reviewCmd(ctx, args[1:])
+	case "triage":
+		return e.Triage(ctx, args[1:])
 	}
 	fmt.Fprintf(e.Stderr, "agk: unknown command %q\n\n%s", args[0], usage)
 	return ExitError

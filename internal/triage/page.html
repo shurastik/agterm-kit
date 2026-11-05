@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+{{.CSP}}
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>codex review triage</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f5; --card: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e2e2e0;
+  --accent: #2f6fde; --critical: #c62828; --high: #e0661b; --medium: #b8860b; --low: #6e6e73;
+  --fix: #2e7d32; --skip: #6e6e73; --discuss: #2f6fde;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1b1d; --card: #242427; --fg: #ececf0; --muted: #9a9aa2; --line: #36363b;
+    --accent: #6ea0ff; --critical: #ff6b6b; --high: #ff9f5a; --medium: #e8c25a; --low: #9a9aa2;
+    --fix: #6fcf75; --skip: #9a9aa2; --discuss: #6ea0ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 1; background: var(--bg); border-bottom: 1px solid var(--line);
+  padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .summary { color: var(--muted); flex: 1 1 320px; margin: 0; }
+.tally { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tally b { color: var(--fg); }
+button { font: inherit; font-weight: 600; border: 0; border-radius: 7px; padding: 7px 16px;
+  background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+main { padding: 16px 20px 40px; max-width: 980px; margin: 0 auto; display: grid; gap: 12px; }
+.card { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--sev);
+  border-radius: 9px; padding: 12px 14px; display: grid; gap: 8px; }
+.card[data-severity="critical"] { --sev: var(--critical); }
+.card[data-severity="high"] { --sev: var(--high); }
+.card[data-severity="medium"] { --sev: var(--medium); }
+.card[data-severity="low"] { --sev: var(--low); }
+.head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sev { color: var(--sev); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+.title { font-weight: 600; flex: 1 1 300px; }
+.meta { color: var(--muted); font-size: 12px; }
+.loc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+.body, .rec { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.rec { padding-left: 10px; border-left: 2px solid var(--line); color: var(--fg); }
+.rec::before { content: "Suggested: "; color: var(--muted); }
+.controls { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; flex: none; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 5px 12px; cursor: pointer; color: var(--muted); user-select: none; }
+.seg label + input + label { border-left: 1px solid var(--line); }
+.seg input:checked + label { color: #fff; font-weight: 600; }
+.seg input[value="fix"]:checked + label { background: var(--fix); }
+.seg input[value="skip"]:checked + label { background: var(--skip); }
+.seg input[value="discuss"]:checked + label { background: var(--discuss); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
+textarea { flex: 1 1 260px; min-height: 32px; resize: vertical; font: inherit; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+.error { color: var(--critical); }
+@media (max-width: 560px) { header, main { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<form id="triage" autocomplete="off">
+<header>
+  <h1>codex review · {{len .Findings}} finding{{if ne (len .Findings) 1}}s{{end}}</h1>
+  <p class="summary">{{.Summary}}</p>
+  <span class="tally" id="tally"></span>
+  <button type="submit" id="submit" title="⌘↩">Send decisions</button>
+</header>
+<main>
+{{- range $i, $f := .Findings}}{{$n := inc $i}}
+<section class="card" data-finding="{{$n}}" data-severity="{{$f.Severity}}">
+  <div class="head">
+    <span class="num">#{{$n}}</span>
+    <span class="sev">{{$f.Severity}}</span>
+    <span class="title">{{$f.Title}}</span>
+    <span class="meta">confidence {{pct $f.Confidence}}</span>
+  </div>
+  <div class="loc">{{loc $f}}</div>
+  <p class="body">{{$f.Body}}</p>
+  {{- if $f.Recommendation}}
+  <p class="rec">{{$f.Recommendation}}</p>
+  {{- end}}
+  <div class="controls">
+    <span class="seg" role="radiogroup" aria-label="Decision for finding {{$n}}">
+      {{- range $d := decisions}}
+      <input type="radio" id="d-{{$n}}-{{$d}}" name="d-{{$n}}" value="{{$d}}"{{if eq $d (default $f)}} checked{{end}}><label for="d-{{$n}}-{{$d}}">{{$d}}</label>
+      {{- end}}
+    </span>
+    <textarea name="note-{{$n}}" rows="1" maxlength="2000" placeholder="Note (optional)"></textarea>
+  </div>
+</section>
+{{- end}}
+</main>
+</form>
+<script nonce="{{.Nonce}}">
+(function () {
+  "use strict";
+  var form = document.getElementById("triage");
+  var button = document.getElementById("submit");
+  var tally = document.getElementById("tally");
+  var cards = Array.prototype.slice.call(document.querySelectorAll("section[data-finding]"));
+
+  function collect() {
+    return cards.map(function (card) {
+      var n = parseInt(card.getAttribute("data-finding"), 10);
+      var picked = form.querySelector('input[name="d-' + n + '"]:checked');
+      return { id: n, decision: picked ? picked.value : "", note: form.elements["note-" + n].value };
+    });
+  }
+
+  function updateTally() {
+    var c = { fix: 0, skip: 0, discuss: 0 };
+    collect().forEach(function (d) { if (d.decision in c) { c[d.decision]++; } });
+    tally.innerHTML = "";
+    ["fix", "skip", "discuss"].forEach(function (k, i) {
+      if (i) { tally.appendChild(document.createTextNode(" · ")); }
+      var b = document.createElement("b");
+      b.textContent = String(c[k]);
+      tally.appendChild(b);
+      tally.appendChild(document.createTextNode(" " + k));
+    });
+  }
+
+  function fail(msg) {
+    button.disabled = false;
+    tally.className = "tally error";
+    tally.textContent = msg;
+  }
+
+  function submit(ev) {
+    if (ev) { ev.preventDefault(); }
+    if (button.disabled) { return; }
+    if (typeof agterm === "undefined" || !agterm.request) { fail("agterm bridge unavailable"); return; }
+    button.disabled = true;
+    try {
+      var r = agterm.request("session.overlay.submit", { args: { value: JSON.stringify(collect()) } });
+      if (r && typeof r.then === "function") {
+        r.then(null, function (e) { fail("submit failed: " + e); });
+      }
+    } catch (e) {
+      fail("submit failed: " + e);
+    }
+  }
+
+  form.addEventListener("submit", submit);
+  form.addEventListener("change", updateTally);
+  document.addEventListener("keydown", function (ev) {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") { submit(ev); }
+  });
+  updateTally();
+  var first = form.querySelector("input:checked");
+  if (first) { first.focus(); }
+})();
+</script>
+</body>
+</html>

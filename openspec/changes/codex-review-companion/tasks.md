@@ -22,10 +22,10 @@
 
 ## 4. `agk review` commands
 
-- [ ] 4.1 Implement `agk review run <dir>` (status `active` + info, run codex, parse, write `review.json`, `completed` + summary; any failure → `blocked` + reason, raw output kept, non-zero exit); tests with fake `Ctl`/`Runner` cover findings, clean approve, codex failure and invalid output
-- [ ] 4.2 Implement `agk review start [--base]` inside agterm (scope check before any agterm call, run dir + `prompt.md`, `NewCompanion` with absolute `os.Executable()` path and shell-quoted args, JSON `{"companion","dir"}` on stdout); tests assert no `Ctl` call on empty scope and exact companion argv otherwise
-- [ ] 4.3 Implement the outside-agterm path of `review start` (inline run, no `Ctl` calls, `{"companion": null, "dir": ...}`, exit code mirrors the run); test with `AGTERM_ENABLED` unset
-- [ ] 4.4 Wire `cmd/agk/main.go` dispatch with usage text and exit codes 0/1/2/3; verify `go build ./cmd/agk` and `agk --help`, `agk review --help` output
+- [x] 4.1 Implement `agk review run <dir>` (status `active` + info, run codex, parse, write `review.json`, `completed` + summary; any failure → `blocked` + reason, raw output kept, non-zero exit); tests with fake `Ctl`/`Runner` cover findings, clean approve, codex failure and invalid output
+- [x] 4.2 Implement `agk review start [--base]` inside agterm (scope check before any agterm call, run dir + `prompt.md`, `NewCompanion` with absolute `os.Executable()` path and shell-quoted args, JSON `{"companion","dir"}` on stdout); tests assert no `Ctl` call on empty scope and exact companion argv otherwise
+- [x] 4.3 Implement the outside-agterm path of `review start` (inline run, no `Ctl` calls, `{"companion": null, "dir": ...}`, exit code mirrors the run); test with `AGTERM_ENABLED` unset
+- [x] 4.4 Wire `cmd/agk/main.go` dispatch with usage text and exit codes 0/1/2/3; verify `go build ./cmd/agk` and `agk --help`, `agk review --help` output
 
 ## 5. `agk triage`
 

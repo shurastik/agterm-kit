@@ -7,9 +7,9 @@
 
 ## 2. agterm control wrapper
 
-- [ ] 2.1 Write failing tests for the real `agterm.Ctl` argv of `NewCompanion` (incl. `--parent --command --wait --no-select --name --cwd --json` and id parsing from the spike's response shape), `Status` and `Info`, using an injected exec func; implement until `go test ./internal/agterm/` passes
-- [ ] 2.2 Write failing tests for `OverlayHTML` argv (`--html --js --block --follow --target`, no `--cwd`) and exit mapping (0 → submitted with value, 2 → `ErrDismissed`, other → error with stderr, unparsable stdout → error); implement until tests pass
-- [ ] 2.3 Add a recording fake `Ctl` for higher-level tests and verify it with a small self-test
+- [x] 2.1 Write failing tests for the real `agterm.Ctl` argv of `NewCompanion` (incl. `--parent --command --wait --no-select --name --cwd --json` and id parsing from the spike's response shape), `Status` and `Info`, using an injected exec func; implement until `go test ./internal/agterm/` passes
+- [x] 2.2 Write failing tests for `OverlayHTML` argv (`--html --js --block --follow --target`, no `--cwd`) and exit mapping (0 → submitted with value, 2 → `ErrDismissed`, other → error with stderr, unparsable stdout → error); implement until tests pass
+- [x] 2.3 Add a recording fake `Ctl` for higher-level tests and verify it with a small self-test
 
 ## 3. Review core
 

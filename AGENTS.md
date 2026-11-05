@@ -19,6 +19,18 @@ go vet ./...                     # Vet
 go mod tidy                      # Sync deps
 ```
 
+## Usage
+
+```bash
+agk review start [--base main]   # spawn the codex-review companion; prints {"companion","dir"}
+agtermctl session wait --target <companion> --until completed --until blocked
+agk triage <dir>/review.json     # overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
+```
+
+The agent-facing workflow lives in `skill/agterm-codex-review/SKILL.md`, installed with
+`ln -sfn ~/Projects/agterm-kit/skill/agterm-codex-review ~/.claude/skills/agterm-codex-review`.
+Reviewed repos should gitignore `.agk/`.
+
 ## Layout
 
 | Path | Purpose |
@@ -26,8 +38,9 @@ go mod tidy                      # Sync deps
 | `cmd/agk/` | CLI entry point and subcommands |
 | `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`) and a fake for tests |
 | `internal/review/` | Prompt from git diff, codex runner, review JSON parse/validate, run dir |
+| `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Runner, Collect, clock) |
 | `internal/triage/` | HTML triage page (`html/template` + embedded CSS/JS) and outcome parsing |
-| `assets/` | Embedded files (review output schema) |
+| `assets/` | Embedded files (review output schema, review prompt template) |
 | `skill/` | Claude skill telling the agent how to use `agk`; symlinked into `~/.claude/skills/` |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` of the reviewed repo (gitignored here).
@@ -36,6 +49,9 @@ Run artifacts land in `.agk/reviews/<timestamp>/` of the reviewed repo (gitignor
 
 - Every `agtermctl` and `codex` call goes through an interface (`agterm.Ctl`, `review.Runner`) so tests
   assert exact argv against fakes; no test touches a real agterm or codex.
+- `agtermctl` calls always pass `--target`: its default is the frontmost session, not the caller's.
+  A companion's `$AGTERM_SESSION_ID` is its own id. `--command` runs in the user's login shell
+  (fish), so paths with `\` or newlines are refused rather than quoted.
 - Codex output is untrusted. Render it only through `html/template`, never put it into `data-agterm`
   attributes, and keep the page CSP strict. The overlay bridge can run any socket command.
 - Outside agterm (`AGTERM_ENABLED` unset) commands degrade to plain terminal output with a distinct exit code.

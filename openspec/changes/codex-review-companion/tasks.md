@@ -37,7 +37,7 @@
 ## 6. Skill and docs
 
 - [ ] 6.1 Write `skill/agterm-codex-review/SKILL.md` per design D12 (trigger description, start → background wait → triage → act loop, exit-code handling incl. 2 and 3 fallbacks), symlink it into `~/.claude/skills/agterm-codex-review`, and verify the link resolves
-- [ ] 6.2 Update `AGENTS.md` (commands, install via `go install ./cmd/agk`, gitignore `.agk/` in reviewed repos) and verify the documented build/install commands run as written
+- [x] 6.2 Update `AGENTS.md` (commands, install via `go install ./cmd/agk`, gitignore `.agk/` in reviewed repos) and verify the documented build/install commands run as written
 
 ## 7. Integration checks
 

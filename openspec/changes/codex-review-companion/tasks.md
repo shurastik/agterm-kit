@@ -2,8 +2,8 @@
 
 ## 1. Spike: agterm bridge and companion behavior
 
-- [ ] 1.1 Open a throwaway HTML page (nonce CSP meta, static script calling `agterm.request("session.overlay.submit", {args: {value: JSON.stringify([...])}})`, plus one un-nonced inline script) with `agtermctl session overlay open --html F --js --block --follow`; record the exact stdout JSON and exit code on submit and on ⌘W, whether `value` arrives verbatim, and whether the un-nonced script is blocked; write the findings into design.md D8 (and fix D2 if the outcome shape differs)
-- [ ] 1.2 Create a companion with `agtermctl session new --parent $AGTERM_SESSION_ID --command '<cmd printing $AGTERM_SESSION_ID and $0>' --wait --no-select --name spike --json`; record the `--json` response shape (where the id is), whether `--command` runs through a shell, and whether the companion's `$AGTERM_SESSION_ID` is its own id; update design.md D2/D3 accordingly and close the spike companion
+- [x] 1.1 Open a throwaway HTML page (nonce CSP meta, static script calling `agterm.request("session.overlay.submit", {args: {value: JSON.stringify([...])}})`, plus one un-nonced inline script) with `agtermctl session overlay open --html F --js --block --follow`; record the exact stdout JSON and exit code on submit and on ⌘W, whether `value` arrives verbatim, and whether the un-nonced script is blocked; write the findings into design.md D8 (and fix D2 if the outcome shape differs)
+- [x] 1.2 Create a companion with `agtermctl session new --parent $AGTERM_SESSION_ID --command '<cmd printing $AGTERM_SESSION_ID and $0>' --wait --no-select --name spike --json`; record the `--json` response shape (where the id is), whether `--command` runs through a shell, and whether the companion's `$AGTERM_SESSION_ID` is its own id; update design.md D2/D3 accordingly and close the spike companion
 
 ## 2. agterm control wrapper
 

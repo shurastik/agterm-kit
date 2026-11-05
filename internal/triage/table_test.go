@@ -53,3 +53,32 @@ func TestTableNeutralizesControlCharacters(t *testing.T) {
 		}
 	}
 }
+
+// cells splits a markdown table row on pipes not escaped by an odd number of backslashes.
+func cells(row string) int {
+	n, bs := 0, 0
+	for _, r := range row {
+		switch {
+		case r == '\\':
+			bs++
+			continue
+		case r == '|' && bs%2 == 0:
+			n++
+		}
+		bs = 0
+	}
+	return n
+}
+
+func TestTableBackslashesBeforePipes(t *testing.T) {
+	r := sample()
+	r.Findings[0].Title = `a\|b`
+	r.Findings[0].Recommendation = `c\\|d\\\|e`
+	r.Findings[1].Title = `trailing\`
+	out := Table(r)
+	for i, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if n := cells(l); n != 6 {
+			t.Errorf("line %d splits into %d delimiters: %q", i, n, l)
+		}
+	}
+}

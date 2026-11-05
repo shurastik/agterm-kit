@@ -201,3 +201,21 @@ func TestReviewStartWithoutPathSkipsEnvPrefix(t *testing.T) {
 		t.Fatalf("command = %q", cmd)
 	}
 }
+
+func TestReviewStartForwardsCodexHome(t *testing.T) {
+	h := newHarness(t, true)
+	h.vars["PATH"] = "/usr/bin"
+	h.vars["CODEX_HOME"] = "/custom/codex"
+	h.vars["OPENAI_API_KEY"] = "sk-secret"
+	scriptScope(h, t.TempDir())
+	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	cmd := h.ctl.Calls[0].Args[2]
+	if !strings.HasPrefix(cmd, "env 'PATH=/usr/bin' 'CODEX_HOME=/custom/codex' '/usr/local/bin/agk' review run ") {
+		t.Fatalf("command = %q", cmd)
+	}
+	if strings.Contains(cmd, "sk-secret") {
+		t.Fatal("secrets must never be put on the companion command line")
+	}
+}

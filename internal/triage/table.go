@@ -19,10 +19,12 @@ func Table(r review.Review) string {
 	return b.String()
 }
 
-var cellReplacer = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "|", `\|`)
+// Backslashes are doubled first so an escaped pipe cannot be un-escaped by
+// text that already ends in a backslash.
+var cellReplacer = strings.NewReplacer(`\`, `\\`, "\r\n", " ", "\n", " ", "\r", " ", "|", `\|`)
 
 // cell makes untrusted text safe for one table cell on a terminal: line breaks
-// become spaces, pipes are escaped, and control characters (C0, DEL, C1) and
+// become spaces, backslashes and pipes are escaped, and control characters (C0, DEL, C1) and
 // bidi overrides are shown as \uXXXX instead of reaching the terminal.
 func cell(s string) string {
 	s = cellReplacer.Replace(s)

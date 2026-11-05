@@ -138,3 +138,19 @@ func assertBlocked(t *testing.T, h *harness, reason string) {
 		t.Fatalf("last calls = %v, want %v", h.ctl.Calls[n-2:], want)
 	}
 }
+
+func TestReviewRunReportsBlockedAfterCancel(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := runDir(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Ctrl-C / SIGTERM before or during the codex run
+	h.runner.err = context.Canceled
+	if code := h.env.ReviewRun(ctx, []string{dir}); code == 0 {
+		t.Fatal("want non-zero exit")
+	}
+	assertBlocked(t, h, review.ReasonCodexFailed)
+	n := len(h.ctl.CtxErrs)
+	if h.ctl.CtxErrs[n-2] != nil || h.ctl.CtxErrs[n-1] != nil {
+		t.Fatalf("final status sent with a cancelled context: %v", h.ctl.CtxErrs)
+	}
+}

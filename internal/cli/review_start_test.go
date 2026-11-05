@@ -45,6 +45,7 @@ func TestReviewStartNothingToReview(t *testing.T) {
 
 func TestReviewStartSpawnsCompanion(t *testing.T) {
 	h := newHarness(t, true)
+	h.vars["PATH"] = "/opt/homebrew/bin:/usr/bin"
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	seen := scriptScope(h, root)
 
@@ -62,7 +63,9 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "NewCompanion" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
-	wantCmd := fmt.Sprintf("'/usr/local/bin/agk' review run '%s'", dir)
+	// The caller's PATH is pinned so codex and agtermctl resolve inside the
+	// companion even when agterm starts it without a login shell.
+	wantCmd := fmt.Sprintf("env 'PATH=/opt/homebrew/bin:/usr/bin' '/usr/local/bin/agk' review run '%s'", dir)
 	if got := h.ctl.Calls[0].Args; !reflect.DeepEqual(got, []string{"SELF", "codex-review", wantCmd, root}) {
 		t.Fatalf("companion args = %q", got)
 	}
@@ -185,5 +188,16 @@ func TestReviewStartRejectsBeforeCreatingRunDir(t *testing.T) {
 	h.env.ReviewStart(context.Background(), nil)
 	if exists(filepath.Join(root, ".agk")) {
 		t.Fatal("run dir must not be created when the command cannot be built")
+	}
+}
+
+func TestReviewStartWithoutPathSkipsEnvPrefix(t *testing.T) {
+	h := newHarness(t, true)
+	scriptScope(h, t.TempDir())
+	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if cmd := h.ctl.Calls[0].Args[2]; !strings.HasPrefix(cmd, "'/usr/local/bin/agk' review run ") {
+		t.Fatalf("command = %q", cmd)
 	}
 }

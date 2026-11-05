@@ -20,25 +20,38 @@ type Runner interface {
 	OutputPath(dir string) string
 }
 
-// StreamExec runs name with args in dir, feeding stdin and sending combined
-// stdout and stderr to out. A non-zero exit is an error.
-type StreamExec func(ctx context.Context, name string, args []string, dir string, stdin io.Reader, out io.Writer) error
+// StreamExec runs name with args in dir and environment env, feeding stdin and
+// sending combined stdout and stderr to out. A non-zero exit is an error.
+type StreamExec func(ctx context.Context, name string, args []string, dir string, env []string, stdin io.Reader, out io.Writer) error
 
 // RunStreaming is the real StreamExec.
-func RunStreaming(ctx context.Context, name string, args []string, dir string, stdin io.Reader, out io.Writer) error {
+func RunStreaming(ctx context.Context, name string, args []string, dir string, env []string, stdin io.Reader, out io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, stdin, out, out
+	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, env, stdin, out, out
 	return cmd.Run()
 }
 
 // Codex runs `codex exec` read-only with the bundled output schema.
 type Codex struct {
-	Bin  string
-	Exec StreamExec
+	Bin     string
+	Exec    StreamExec
+	Environ func() []string
 }
 
 // NewCodex returns a Codex runner using codex from PATH.
-func NewCodex() *Codex { return &Codex{Bin: "codex", Exec: RunStreaming} }
+func NewCodex() *Codex { return &Codex{Bin: "codex", Exec: RunStreaming, Environ: os.Environ} }
+
+// childEnv drops agterm identity so codex's own agterm status hooks stay
+// silent: only agk may set the companion's status, after validating output.
+func childEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "AGTERM_") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
 
 var _ Runner = (*Codex)(nil)
 
@@ -57,7 +70,7 @@ func (c *Codex) Run(ctx context.Context, root, dir, prompt string, term io.Write
 	defer logf.Close()
 	args := []string{"exec", "-s", "read-only", "-C", root, "--ephemeral",
 		"--output-schema", schema, "-o", c.OutputPath(dir), "-"}
-	if err := c.Exec(ctx, c.Bin, args, root, strings.NewReader(prompt), io.MultiWriter(term, logf)); err != nil {
+	if err := c.Exec(ctx, c.Bin, args, root, childEnv(c.Environ()), strings.NewReader(prompt), io.MultiWriter(term, logf)); err != nil {
 		return fmt.Errorf("codex failed: %w", err)
 	}
 	return nil

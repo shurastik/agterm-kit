@@ -23,7 +23,7 @@ go mod tidy                      # Sync deps
 
 ```bash
 agk review start [--base main]   # spawn the codex-review companion; prints {"companion","dir"}
-agtermctl session wait --target <companion> --until completed --until blocked
+agtermctl session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked
 agk triage <dir>/review.json     # overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
 ```
 
@@ -49,7 +49,11 @@ Run artifacts land in `.agk/reviews/<timestamp>/` of the reviewed repo (gitignor
 
 - Every `agtermctl` and `codex` call goes through an interface (`agterm.Ctl`, `review.Runner`) so tests
   assert exact argv against fakes; no test touches a real agterm or codex.
-- `agtermctl` calls always pass `--target`: its default is the frontmost session, not the caller's.
+- `agtermctl` calls always pass `--target` (its default is the frontmost session, not the caller's)
+  and `--socket $AGTERM_SOCKET` (agtermctl ignores the variable). The binary resolves like agterm's
+  hooks: `$AGTERMCTL`, the app bundle, then PATH.
+- The codex child runs without `AGTERM_*` variables so its own agterm status hooks cannot mark the
+  companion done before agk has validated the output.
   A companion's `$AGTERM_SESSION_ID` is its own id. `--command` runs in the user's login shell
   (fish), so paths with `\` or newlines are refused rather than quoted.
 - Codex output is untrusted. Render it only through `html/template`, never put it into `data-agterm`

@@ -21,6 +21,8 @@ func (c Call) String() string { return fmt.Sprintf("%s%q", c.Method, c.Args) }
 type Fake struct {
 	mu    sync.Mutex
 	Calls []Call
+	// CtxErrs[i] is ctx.Err() at the time of Calls[i].
+	CtxErrs []error
 
 	CompanionID  string
 	CompanionErr error
@@ -34,10 +36,11 @@ type Fake struct {
 
 var _ agterm.Ctl = (*Fake)(nil)
 
-func (f *Fake) record(method string, args ...string) {
+func (f *Fake) record(ctx context.Context, method string, args ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: method, Args: args})
+	f.CtxErrs = append(f.CtxErrs, ctx.Err())
 }
 
 // Methods returns the recorded method names in order.
@@ -51,23 +54,23 @@ func (f *Fake) Methods() []string {
 	return out
 }
 
-func (f *Fake) NewCompanion(_ context.Context, parent, name, command, cwd string) (string, error) {
-	f.record("NewCompanion", parent, name, command, cwd)
+func (f *Fake) NewCompanion(ctx context.Context, parent, name, command, cwd string) (string, error) {
+	f.record(ctx, "NewCompanion", parent, name, command, cwd)
 	return f.CompanionID, f.CompanionErr
 }
 
-func (f *Fake) Status(_ context.Context, target, state string) error {
-	f.record("Status", target, state)
+func (f *Fake) Status(ctx context.Context, target, state string) error {
+	f.record(ctx, "Status", target, state)
 	return f.StatusErr
 }
 
-func (f *Fake) Info(_ context.Context, target, markdown string) error {
-	f.record("Info", target, markdown)
+func (f *Fake) Info(ctx context.Context, target, markdown string) error {
+	f.record(ctx, "Info", target, markdown)
 	return f.InfoErr
 }
 
-func (f *Fake) OverlayHTML(_ context.Context, target, file string) (agterm.Outcome, error) {
-	f.record("OverlayHTML", target, file)
+func (f *Fake) OverlayHTML(ctx context.Context, target, file string) (agterm.Outcome, error) {
+	f.record(ctx, "OverlayHTML", target, file)
 	if f.OnOverlay != nil {
 		f.OnOverlay(file)
 	}

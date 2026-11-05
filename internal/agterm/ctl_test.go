@@ -151,3 +151,47 @@ func TestOverlayHTMLErrors(t *testing.T) {
 		t.Fatalf("err = %v, want stderr", err)
 	}
 }
+
+func TestSocketPassedToEveryCall(t *testing.T) {
+	ctx := context.Background()
+	s := &stubExec{stdout: `{"ok":true,"result":{"id":"C"}}`}
+	c := &CLI{Bin: "agtermctl", Socket: "/alt.sock", Exec: s.run}
+	c.NewCompanion(ctx, "P", "n", "cmd", "/d")
+	c.Status(ctx, "C", "active")
+	c.Info(ctx, "C", "-x")
+	s.stdout = `{"outcome":"submitted","value":"v"}`
+	c.OverlayHTML(ctx, "S", "/f.html")
+	for _, cl := range s.calls {
+		args := strings.Join(cl.args, " ")
+		if !strings.Contains(args, "--socket /alt.sock") {
+			t.Errorf("no --socket in %q", args)
+		}
+	}
+	info := s.calls[2].args
+	if info[len(info)-2] != "--" || info[len(info)-1] != "-x" {
+		t.Errorf("--socket must precede the -- terminator: %q", info)
+	}
+}
+
+func TestResolveBin(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	execOK := func(paths ...string) func(string) bool {
+		return func(p string) bool {
+			for _, q := range paths {
+				if p == q {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	if got := ResolveBin(env(map[string]string{"AGTERMCTL": "/custom/agtermctl"}), execOK(BundledBin)); got != "/custom/agtermctl" {
+		t.Errorf("override: %q", got)
+	}
+	if got := ResolveBin(env(nil), execOK(BundledBin)); got != BundledBin {
+		t.Errorf("bundled: %q", got)
+	}
+	if got := ResolveBin(env(nil), execOK()); got != "agtermctl" {
+		t.Errorf("path fallback: %q", got)
+	}
+}

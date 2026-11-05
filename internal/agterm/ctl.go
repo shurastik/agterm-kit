@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -40,19 +41,59 @@ func RunProcess(ctx context.Context, name string, args []string) (Result, error)
 
 // CLI implements Ctl by running agtermctl.
 type CLI struct {
-	Bin  string
-	Exec ExecFunc
+	Bin string
+	// Socket, when set, is passed as --socket; agtermctl ignores AGTERM_SOCKET.
+	Socket string
+	Exec   ExecFunc
 }
 
-// NewCLI returns a CLI using agtermctl from PATH.
-func NewCLI() *CLI { return &CLI{Bin: "agtermctl", Exec: RunProcess} }
+// BundledBin is where the agterm app ships agtermctl.
+const BundledBin = "/Applications/agterm.app/Contents/MacOS/agtermctl"
+
+// ResolveBin picks agtermctl the way agterm's own hooks do: $AGTERMCTL, then
+// the app bundle, then PATH.
+func ResolveBin(getenv func(string) string, isExec func(string) bool) string {
+	if b := getenv("AGTERMCTL"); b != "" {
+		return b
+	}
+	if isExec(BundledBin) {
+		return BundledBin
+	}
+	return "agtermctl"
+}
+
+func isExecutable(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0
+}
+
+// NewCLI returns a CLI for the agterm instance this process runs in.
+func NewCLI() *CLI {
+	return &CLI{Bin: ResolveBin(os.Getenv, isExecutable), Socket: os.Getenv("AGTERM_SOCKET"), Exec: RunProcess}
+}
 
 func (c *CLI) run(ctx context.Context, args ...string) (Result, error) {
+	if c.Socket != "" {
+		args = withSocket(args, c.Socket)
+	}
 	res, err := c.Exec(ctx, c.Bin, args)
 	if err != nil {
 		return res, fmt.Errorf("agtermctl %s: %w", strings.Join(args[:2], " "), err)
 	}
 	return res, nil
+}
+
+// withSocket adds --socket before a trailing "--" terminator, if any.
+func withSocket(args []string, socket string) []string {
+	out := make([]string, 0, len(args)+2)
+	for i, a := range args {
+		if a == "--" {
+			out = append(out, "--socket", socket)
+			return append(out, args[i:]...)
+		}
+		out = append(out, a)
+	}
+	return append(out, "--socket", socket)
 }
 
 func (c *CLI) runOK(ctx context.Context, args ...string) (Result, error) {

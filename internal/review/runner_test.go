@@ -18,8 +18,11 @@ func TestCodexRun(t *testing.T) {
 	dir := t.TempDir()
 	var gotName, gotDir, gotStdin string
 	var gotArgs []string
-	c := &Codex{Bin: "codex", Exec: func(_ context.Context, name string, args []string, wd string, stdin io.Reader, out io.Writer) error {
-		gotName, gotArgs, gotDir = name, args, wd
+	var gotEnv []string
+	c := &Codex{Bin: "codex", Environ: func() []string {
+		return []string{"PATH=/bin", "AGTERM_SESSION_ID=C", "AGTERM_ENABLED=1", "AGTERM_SOCKET=/s", "HOME=/h"}
+	}, Exec: func(_ context.Context, name string, args []string, wd string, env []string, stdin io.Reader, out io.Writer) error {
+		gotName, gotArgs, gotDir, gotEnv = name, args, wd, env
 		b, _ := io.ReadAll(stdin)
 		gotStdin = string(b)
 		io.WriteString(out, "thinking...\n")
@@ -34,6 +37,11 @@ func TestCodexRun(t *testing.T) {
 		"-o", filepath.Join(dir, "codex-output.json"), "-"}
 	if gotName != "codex" || gotDir != "/repo" || !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("exec %q %q in %q", gotName, gotArgs, gotDir)
+	}
+	// The child must not see agterm identity, or its own status hooks would
+	// mark the companion completed before agk validates the result.
+	if !reflect.DeepEqual(gotEnv, []string{"PATH=/bin", "HOME=/h"}) {
+		t.Fatalf("env = %q", gotEnv)
 	}
 	if gotStdin != "PROMPT" {
 		t.Fatalf("stdin = %q", gotStdin)
@@ -56,7 +64,7 @@ func TestCodexRun(t *testing.T) {
 
 func TestCodexRunFailure(t *testing.T) {
 	dir := t.TempDir()
-	c := &Codex{Bin: "codex", Exec: func(_ context.Context, _ string, _ []string, _ string, _ io.Reader, out io.Writer) error {
+	c := &Codex{Bin: "codex", Environ: os.Environ, Exec: func(_ context.Context, _ string, _ []string, _ string, _ []string, _ io.Reader, out io.Writer) error {
 		io.WriteString(out, "auth error\n")
 		return errors.New("exit status 1")
 	}}

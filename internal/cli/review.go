@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shurastik/agterm-kit/internal/review"
 )
@@ -20,10 +21,16 @@ type reporter struct {
 	target string
 }
 
+// statusTimeout bounds each status update, which runs detached from the
+// review's context so a cancelled run still reports blocked.
+const statusTimeout = 5 * time.Second
+
 func (r reporter) set(ctx context.Context, state, line string) {
 	if r.target == "" {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
+	defer cancel()
 	// Status is best effort: a broken socket must not abort the review.
 	if err := r.env.Ctl.Status(ctx, r.target, state); err != nil {
 		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
@@ -136,6 +143,15 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		}
 		if cmdExe, err = shellQuote(exe); err != nil {
 			return e.errorf("%v", err)
+		}
+		// Pin the caller's PATH so codex and agtermctl resolve in the companion
+		// even when agterm runs the command without a login shell.
+		if path := e.Getenv("PATH"); path != "" {
+			qp, err := shellQuote("PATH=" + path)
+			if err != nil {
+				return e.errorf("%v", err)
+			}
+			cmdExe = "env " + qp + " " + cmdExe
 		}
 		if _, err := shellQuote(scope.Root); err != nil {
 			return e.errorf("%v", err)

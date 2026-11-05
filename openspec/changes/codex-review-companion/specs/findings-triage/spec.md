@@ -80,3 +80,7 @@ When `AGTERM_ENABLED` is not set, `agk triage` SHALL print the findings as a mar
 #### Scenario: Table cells stay intact
 - **WHEN** a finding's title or recommendation contains `|` or a newline
 - **THEN** the table still has exactly one row per finding with the same number of columns
+
+#### Scenario: Terminal control sequences are neutralized
+- **WHEN** a finding's text contains terminal control characters (for example an ANSI CSI sequence or an OSC 52 clipboard write) or bidi override characters
+- **THEN** stdout contains them only as visible `\uXXXX` escapes and no raw control byte reaches the terminal

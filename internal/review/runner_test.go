@@ -137,3 +137,39 @@ func TestRunStreamingCancelEscalatesToSIGKILL(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// When the descendant has detached its output, Run returns as soon as the
+// shell dies; the group must still be dead by the time RunStreaming returns,
+// because agk exits right after and an async timer would die with it.
+func TestRunStreamingStopsGroupBeforeReturning(t *testing.T) {
+	old := killGrace
+	killGrace = time.Second
+	defer func() { killGrace = old }()
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		script := `(trap '' TERM; exec sleep 30 >/dev/null 2>&1) & echo $! > '` + pidFile + `'; wait`
+		done <- RunStreaming(ctx, "sh", []string{"-c", script}, t.TempDir(), os.Environ(), strings.NewReader(""), io.Discard)
+	}()
+	var pid int
+	for i := 0; i < 50 && pid == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 {
+		t.Fatal("grandchild pid not written")
+	}
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	cancel()
+	<-done
+	// Allow only for launchd reaping the killed orphan, far below killGrace.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("descendant still alive after RunStreaming returned")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

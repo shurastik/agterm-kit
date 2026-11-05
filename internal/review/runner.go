@@ -41,14 +41,28 @@ func RunStreaming(ctx context.Context, name string, args []string, dir string, e
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, env, stdin, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		pgid := cmd.Process.Pid
-		// Descendants may ignore SIGTERM; finish the group off after a grace period.
-		time.AfterFunc(killGrace, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
-		return syscall.Kill(-pgid, syscall.SIGTERM)
-	}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = waitDelay
-	return cmd.Run()
+	err := cmd.Run()
+	if ctx.Err() != nil && cmd.Process != nil {
+		// Synchronous on purpose: agk exits right after, so a timer would die with it.
+		stopGroup(cmd.Process.Pid, killGrace)
+	}
+	return err
+}
+
+// stopGroup sends SIGTERM to the process group, waits up to grace for it to
+// disappear, then sends SIGKILL.
+func stopGroup(pgid int, grace time.Duration) {
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(-pgid, 0) != nil {
+			return // no process left in the group
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
 // Codex runs `codex exec` read-only with the bundled output schema.

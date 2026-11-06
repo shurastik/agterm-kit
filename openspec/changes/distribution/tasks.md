@@ -31,8 +31,8 @@
 ## 6. Integration
 
 - [x] 6.1 Quality gates: `go build ./... && go vet ./... && go test ./...` pass
-- [ ] 6.2 First release `0.1.0` with `scripts/release.sh`, then on this machine: `brew install shurastik/tap/agk`, `agk version` prints `0.1.0`, `agk setup --dry-run` then `agk setup`; verify `~/.claude/skills/agk-review` and `~/.codex/skills/agk-review` link into `/opt/homebrew/opt/agk/share/agk/skills/`, the legacy link is gone, `~/.config/git/ignore` has one `.agk/` line, and a second `agk setup` reports everything `ok`
-- [ ] 6.3 Remove `~/go/bin/agk`, start a fresh Claude Code session and a fresh Codex session and verify each lists the `agk-review` skill; run `agk review start` in a scratch repo to confirm the brew binary works end to end
+- [x] 6.2 First release `0.1.0` with `scripts/release.sh`, then on this machine: `brew install shurastik/tap/agk`, `agk version` prints `0.1.0`, `agk setup --dry-run` then `agk setup`; verify `~/.claude/skills/agk-review` and `~/.codex/skills/agk-review` link into `/opt/homebrew/opt/agk/share/agk/skills/`, the legacy link is gone, `~/.config/git/ignore` has one `.agk/` line, and a second `agk setup` reports everything `ok`
+- [x] 6.3 Remove `~/go/bin/agk`, start a fresh Claude Code session and a fresh Codex session and verify each lists the `agk-review` skill; run `agk review start` in a scratch repo to confirm the brew binary works end to end
 
 ## Workflow follow-up
 

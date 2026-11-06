@@ -161,3 +161,23 @@ func TestCollectIgnoresTextconv(t *testing.T) {
 		t.Fatalf("diff lacks the raw change:\n%s", s.Diff)
 	}
 }
+
+// Git config must not hide a submodule update from the review.
+func TestCollectSeesSubmoduleUpdateDespiteIgnoreConfig(t *testing.T) {
+	sub := gitRepo(t)
+	dir := gitRepo(t)
+	git(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "dep")
+	git(t, dir, "commit", "-qm", "add dep")
+	git(t, dir, "config", "diff.ignoreSubmodules", "all")
+	git(t, dir, "config", "-f", ".gitmodules", "submodule.dep.ignore", "all")
+	write(t, filepath.Join(dir, "dep"), "new.go", "package a\n")
+	git(t, filepath.Join(dir, "dep"), "add", "-A")
+	git(t, filepath.Join(dir, "dep"), "commit", "-qm", "bump")
+	s, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatalf("submodule update hidden: %v", err)
+	}
+	if !strings.Contains(s.Diff, "Subproject commit") || !strings.Contains(s.Stat, "dep") {
+		t.Fatalf("diff/stat lack the gitlink change:\n%s\n%s", s.Diff, s.Stat)
+	}
+}

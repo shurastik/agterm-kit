@@ -50,8 +50,10 @@ func TestPromptTruncatesLargeDiff(t *testing.T) {
 	if strings.Contains(p, "TAIL_MARKER") || strings.Contains(p, "LATE_CONTENT") {
 		t.Fatal("content past the cap must be cut")
 	}
-	if !strings.Contains(p, "truncated") || !strings.Contains(p, "git diff abc123") {
-		t.Fatal("truncation note with the command to read the rest is missing")
+	// The read-the-rest command must disable the same git drivers as Collect,
+	// or textconv/ext-diff/submodule config could hide the part past the cap.
+	if !strings.Contains(p, "truncated") || !strings.Contains(p, "git diff "+strings.Join(DiffFlags, " ")+" abc123 -- . ':(exclude).agk'") {
+		t.Fatal("truncation note with the exact command to read the rest is missing")
 	}
 	if !strings.Contains(p, "x.go | 1 +") || !strings.Contains(p, "late.go") {
 		t.Fatal("stat and untracked file names must survive truncation")

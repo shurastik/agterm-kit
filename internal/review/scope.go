@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -16,6 +17,34 @@ var ErrNothingToReview = errors.New("nothing to review")
 
 // MaxUntrackedBytes is the largest untracked file whose content goes into the prompt.
 const MaxUntrackedBytes = 64 << 10
+
+// DiffFlags make git show the raw change: no external diff tools, no textconv
+// filters and no submodule hiding from config, any of which could drop changes
+// from the review.
+var DiffFlags = []string{"--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none"}
+
+// diffArgs is the git diff argv for the review scope; the prompt tells codex
+// to run the same command to read past the size cap.
+func diffArgs(mergeBase string, extra ...string) []string {
+	args := append([]string{"diff"}, DiffFlags...)
+	args = append(args, extra...)
+	return append(args, mergeBase, "--", ".", ":(exclude)"+agkDir)
+}
+
+// ReadRestCommand is the shell command that reproduces the review diff.
+func ReadRestCommand(mergeBase string) string {
+	parts := []string{"git"}
+	for _, a := range diffArgs(mergeBase) {
+		if plainArg.MatchString(a) {
+			parts = append(parts, a)
+		} else {
+			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+var plainArg = regexp.MustCompile(`^[A-Za-z0-9._/=-]+$`)
 
 // agkDir is where run artifacts live inside a reviewed repo; never reviewed.
 const agkDir = ".agk"
@@ -52,10 +81,10 @@ func Collect(ctx context.Context, dir, base string) (Scope, error) {
 	}
 	s.MergeBase = strings.TrimSpace(mb)
 	exclude := ":(exclude)" + agkDir
-	if s.Diff, err = gitOut(ctx, s.Root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", s.MergeBase, "--", ".", exclude); err != nil {
+	if s.Diff, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase)...); err != nil {
 		return Scope{}, err
 	}
-	if s.Stat, err = gitOut(ctx, s.Root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", s.MergeBase, "--", ".", exclude); err != nil {
+	if s.Stat, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase, "--stat")...); err != nil {
 		return Scope{}, err
 	}
 	list, err := gitOut(ctx, s.Root, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", exclude)

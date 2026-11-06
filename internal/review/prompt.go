@@ -15,13 +15,14 @@ var promptTmpl = template.Must(template.New("prompt").Parse(assets.ReviewPrompt)
 
 type promptData struct {
 	Base, MergeBase, Stat, Diff string
+	ReadRest                    string
 	Truncated                   bool
 	Untracked                   []UntrackedFile
 }
 
 // Prompt renders the codex review prompt for s.
 func Prompt(s Scope) (string, error) {
-	d := promptData{Base: s.Base, MergeBase: s.MergeBase, Stat: s.Stat}
+	d := promptData{Base: s.Base, MergeBase: s.MergeBase, Stat: s.Stat, ReadRest: ReadRestCommand(s.MergeBase)}
 	budget := MaxPromptDiffBytes
 	d.Diff, d.Truncated = cutLines(s.Diff, budget)
 	budget -= len(d.Diff)

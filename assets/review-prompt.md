@@ -44,8 +44,9 @@ File paths are relative to the repository root.
 {{- if .Truncated}}
 
 <note>
-The diff above was truncated to fit the prompt. Read the rest yourself with `git diff {{.MergeBase}}`
-and read the untracked files listed below directly.
+The diff above was truncated to fit the prompt. Read the rest yourself with exactly
+`{{.ReadRest}}`
+(these flags disable git drivers that could hide changes) and read the untracked files listed below directly.
 </note>
 {{- end}}
 {{range .Untracked}}

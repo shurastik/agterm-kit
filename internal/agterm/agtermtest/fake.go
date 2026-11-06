@@ -4,7 +4,9 @@ package agtermtest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 )
@@ -30,6 +32,9 @@ type Fake struct {
 	InfoErr      error
 	Outcome      agterm.Outcome
 	OverlayErr   error
+	WaitStatus   string
+	WaitErr      error
+	CloseErr     error
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
 	// OnOverlay, when set, runs before OverlayHTML returns (e.g. to read the page file).
@@ -80,4 +85,15 @@ func (f *Fake) OverlayHTML(ctx context.Context, target, file string) (agterm.Out
 		f.OnOverlay(file)
 	}
 	return f.Outcome, f.OverlayErr
+}
+
+// Wait records target, the joined statuses and the timeout.
+func (f *Fake) Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error) {
+	f.record(ctx, "Wait", target, strings.Join(until, ","), timeout.String())
+	return f.WaitStatus, f.WaitErr
+}
+
+func (f *Fake) Close(ctx context.Context, target string) error {
+	f.record(ctx, "Close", target)
+	return f.CloseErr
 }

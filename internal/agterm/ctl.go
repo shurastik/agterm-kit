@@ -278,6 +278,8 @@ type Ctl interface {
 	Status(ctx context.Context, target, state string) error
 	Info(ctx context.Context, target, markdown string) error
 	OverlayHTML(ctx context.Context, target, file string) (Outcome, error)
+	Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error)
+	Close(ctx context.Context, target string) error
 }
 
 var _ Ctl = (*CLI)(nil)

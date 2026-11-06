@@ -51,7 +51,7 @@
   - the codex applier and the claude reviewer: one round each.
 
   Record the results in the change's design Open Questions (the codex `\r` and trust behaviour), and fix any driver constants with tests
-- [ ] 8.2 Run the quality gates: `go vet ./... && go test ./... && go build -o .bin/agk ./cmd/agk`, plus `openspec validate workers --strict`
+- [x] 8.2 Run the quality gates: `go vet ./... && go test ./... && go build -o .bin/agk ./cmd/agk`, plus `openspec validate workers --strict`
 
 ## Workflow follow-up
 

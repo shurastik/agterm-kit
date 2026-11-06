@@ -69,8 +69,11 @@ func RunStreaming(ctx context.Context, name string, args []string, dir string, e
 		escalate.Stop()
 	}
 	mu.Unlock()
-	if ctx.Err() != nil && cmd.Process != nil {
-		// Synchronous on purpose: agk exits right after, so a timer would die with it.
+	if cmd.Process != nil {
+		// Whatever ended the run (cancel, crash, normal exit), nothing from
+		// codex's group may outlive it. Synchronous on purpose: agk exits right
+		// after, so a timer would die with it. Usually the group is already
+		// empty and this returns at once.
 		stopGroup(cmd.Process.Pid, killGrace)
 	}
 	return err

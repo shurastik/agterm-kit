@@ -24,9 +24,10 @@ type promptData struct {
 
 // Prompt renders the codex review prompt for s.
 func Prompt(s Scope) (string, error) {
-	d := promptData{Base: s.Base, MergeBase: s.MergeBase, Stat: s.Stat, ReadRest: ReadRestCommand(s.MergeBase)}
+	// Escape before budgeting: each invalid byte grows to four characters.
+	d := promptData{Base: s.Base, MergeBase: s.MergeBase, Stat: escapeInvalidUTF8(s.Stat), ReadRest: ReadRestCommand(s.MergeBase)}
 	budget := MaxPromptDiffBytes
-	d.Diff, d.Truncated = cutLines(s.Diff, budget)
+	d.Diff, d.Truncated = cutLines(escapeInvalidUTF8(s.Diff), budget)
 	budget -= len(d.Diff)
 	for _, u := range s.Untracked {
 		if u.Content != "" {
@@ -43,7 +44,7 @@ func Prompt(s Scope) (string, error) {
 	if err := promptTmpl.Execute(&b, d); err != nil {
 		return "", err
 	}
-	return escapeInvalidUTF8(b.String()), nil
+	return escapeInvalidUTF8(b.String()), nil // safety net for any other field
 }
 
 // escapeInvalidUTF8 shows bytes that are not valid UTF-8 as \xNN: codex

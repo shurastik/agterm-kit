@@ -241,3 +241,28 @@ func TestCodexRunNeutralizesTerminalControls(t *testing.T) {
 		}
 	}
 }
+
+// A wrapper that crashes and leaves a child behind must not leak that child,
+// even without cancellation.
+func TestRunStreamingReapsGroupAfterCrash(t *testing.T) {
+	shortGraces(t)
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	script := `sleep 30 >/dev/null 2>&1 & echo $! > '` + pidFile + `'; exit 1`
+	err := RunStreaming(context.Background(), "sh", []string{"-c", script}, t.TempDir(), os.Environ(), strings.NewReader(""), io.Discard)
+	if err == nil {
+		t.Fatal("want the wrapper's failure")
+	}
+	b, _ := os.ReadFile(pidFile)
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if pid == 0 {
+		t.Fatal("child pid not written")
+	}
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	deadline := time.Now().Add(time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("orphaned child still running after RunStreaming returned")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

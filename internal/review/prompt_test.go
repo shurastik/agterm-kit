@@ -86,3 +86,20 @@ func TestPromptIsValidUTF8(t *testing.T) {
 		t.Fatal("invalid bytes should stay visible as \\xNN escapes")
 	}
 }
+
+// Escaping invalid bytes grows them 4x; the size cap must apply afterwards.
+func TestPromptCapAppliesAfterEscaping(t *testing.T) {
+	s := sampleScope()
+	line := "+" + strings.Repeat("\xcf", 99) + "\n"
+	s.Diff = strings.Repeat(line, MaxPromptDiffBytes/len(line)-10) // just under the cap raw
+	p, err := Prompt(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p) > MaxPromptDiffBytes+16<<10 {
+		t.Fatalf("prompt is %d bytes, cap %d", len(p), MaxPromptDiffBytes)
+	}
+	if !strings.Contains(p, "truncated") {
+		t.Fatal("escaped diff over the cap must be truncated with the read-the-rest note")
+	}
+}

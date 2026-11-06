@@ -21,8 +21,8 @@
 
 ## 5. Integration
 
-- [ ] 5.1 Quality gates: `go build ./... && go vet ./... && go test ./...` pass, then `go install ./cmd/agk`
-- [ ] 5.2 Live check inside agterm on a scratch repo with a small diff: `agk review start` → `agk review wait <dir>` prints `completed` and the `codex-review #N` companion disappears from the sidebar (⌘Z brings it back); a run forced to fail (e.g. `PATH` without codex in the forwarded env) prints `blocked` and its companion stays open
+- [x] 5.1 Quality gates: `go build ./... && go vet ./... && go test ./...` pass, then `go install ./cmd/agk`
+- [x] 5.2 Live check inside agterm on a scratch repo with a small diff: `agk review start` → `agk review wait <dir>` prints `completed` and the `codex-review #N` companion disappears from the sidebar (⌘Z brings it back); a run forced to fail (e.g. `PATH` without codex in the forwarded env) prints `blocked` and its companion stays open
 
 ## Workflow follow-up
 

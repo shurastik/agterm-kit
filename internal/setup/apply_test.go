@@ -10,7 +10,7 @@ import (
 
 func fullCfg(e *linkEnv) Config {
 	c := e.cfg()
-	c.GitConfig = func(string) (string, error) { return "", nil }
+	c.GitConfig = func(string) (string, bool, error) { return "", false, nil }
 	c.LookPath = func(n string) (string, error) { return "/bin/" + n, nil }
 	c.IsExec = func(string) bool { return false }
 	return c
@@ -120,7 +120,7 @@ func TestApplyIgnoreHonouredByGit(t *testing.T) {
 		excludes := filepath.Join(e.home, "gitignore")
 		os.WriteFile(excludes, []byte(before), 0o644)
 		c := fullCfg(e)
-		c.GitConfig = func(string) (string, error) { return excludes, nil }
+		c.GitConfig = func(string) (string, bool, error) { return excludes, true, nil }
 		applyPlan(t, c)
 		repo := mkdir(t, e.home, "repo")
 		if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {

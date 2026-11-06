@@ -113,7 +113,8 @@ a literal `.agk`, `.agk/`, `/.agk` or `/.agk/` rule (trailing, not leading, whit
 gitignore does) comes after every `!` rule in the file: git's last matching rule wins, and any
 negation (`!**/.agk/`, `!*`) might re-include it. Otherwise `.agk/` is appended, which makes it
 last again. A relative `core.excludesFile` is a `conflict`: git resolves it per repository, so
-appending would edit the current project's file. Positive globs that might already match are not evaluated; missing one only costs a
+appending would edit the current project's file. An explicitly empty one is a `conflict` too: it
+disables the global excludes file, so the default path would be written but never read. Positive globs that might already match are not evaluated; missing one only costs a
 redundant line. To append: follow the symlink
 chain by hand (relative targets against the link's physical directory), allowing a final target
 that does not exist yet, unlike `filepath.EvalSymlinks`; read the target, add a newline first if the file does not end with

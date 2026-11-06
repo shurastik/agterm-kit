@@ -44,7 +44,7 @@ func newSetupHarness(t *testing.T) *setupHarness {
 		}
 		return "", errors.New("not found")
 	}
-	s.env.GitConfig = func(string) (string, error) { return "", nil }
+	s.env.GitConfig = func(string) (string, bool, error) { return "", false, nil }
 	s.env.IsExec = func(string) bool { return false }
 	return s
 }
@@ -192,7 +192,7 @@ func TestSetupArgs(t *testing.T) {
 
 func TestSetupRelativeExcludesFileLeavesProjectAlone(t *testing.T) {
 	s := newSetupHarness(t)
-	s.env.GitConfig = func(string) (string, error) { return ".gitignore", nil }
+	s.env.GitConfig = func(string) (string, bool, error) { return ".gitignore", true, nil }
 	if code := s.run(); code != ExitError {
 		t.Fatalf("exit %d", code)
 	}

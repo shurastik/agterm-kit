@@ -36,7 +36,7 @@ type Env struct {
 	// Machine wiring for agk setup.
 	Home      string
 	LookPath  func(string) (string, error)
-	GitConfig func(key string) (string, error)
+	GitConfig func(key string) (value string, set bool, err error)
 	IsExec    func(string) bool
 }
 

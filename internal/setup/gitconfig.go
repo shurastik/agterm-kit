@@ -9,16 +9,16 @@ import (
 // GlobalGitConfig reads a machine-wide git config value the way git resolves it
 // outside a repository: the global (user) config wins over the system config.
 // [include] files are followed (off by default with --global/--system) and
-// paths are expanded. An unset key, or no git at all, is "" (the dependency
-// report flags a missing git).
-func GlobalGitConfig(key string) (string, error) {
+// paths are expanded. set tells an explicitly empty value from an unset key;
+// no git at all counts as unset (the dependency report flags a missing git).
+func GlobalGitConfig(key string) (value string, set bool, err error) {
 	for _, scope := range []string{"--global", "--system"} {
 		v, ok, err := gitConfigGet(scope, key)
 		if err != nil || ok {
-			return v, err
+			return v, ok, err
 		}
 	}
-	return "", nil
+	return "", false, nil
 }
 
 func gitConfigGet(scope, key string) (string, bool, error) {

@@ -16,11 +16,11 @@ const IgnoreLine = ".agk/"
 // excludesPath is git's global excludes file: core.excludesFile, else
 // $XDG_CONFIG_HOME/git/ignore, else ~/.config/git/ignore.
 func excludesPath(c Config) (string, error) {
-	p, err := c.GitConfig("core.excludesFile")
+	p, set, err := c.GitConfig("core.excludesFile")
 	if err != nil {
 		return "", err
 	}
-	if p != "" {
+	if set {
 		return p, nil
 	}
 	if x := c.Getenv("XDG_CONFIG_HOME"); x != "" {
@@ -33,6 +33,10 @@ func planIgnore(c Config) ([]Action, error) {
 	p, err := excludesPath(c)
 	if err != nil {
 		return nil, err
+	}
+	if p == "" {
+		// git reads no global excludes file at all; appending to the default would be ignored.
+		return []Action{{Kind: KindConflict, Path: "core.excludesFile", Detail: "core.excludesFile is set empty, which disables the global ignore; set an absolute path"}}, nil
 	}
 	if !filepath.IsAbs(p) {
 		// git resolves it per repository; editing it here would touch the current project.

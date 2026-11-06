@@ -12,7 +12,7 @@ func ignoreCfg(home string, vars map[string]string, excludes string) Config {
 	return Config{
 		Home:      home,
 		Getenv:    func(k string) string { return vars[k] },
-		GitConfig: func(string) (string, error) { return excludes, nil },
+		GitConfig: func(string) (string, bool, error) { return excludes, excludes != "", nil },
 	}
 }
 
@@ -37,7 +37,7 @@ func TestIgnorePathSources(t *testing.T) {
 
 func TestIgnoreGitConfigError(t *testing.T) {
 	c := ignoreCfg(realTemp(t), map[string]string{}, "")
-	c.GitConfig = func(string) (string, error) { return "", errors.New("boom") }
+	c.GitConfig = func(string) (string, bool, error) { return "", false, errors.New("boom") }
 	if _, err := planIgnore(c); err == nil {
 		t.Fatal("want error")
 	}
@@ -93,5 +93,17 @@ func TestIgnoreRelativeExcludesFileIsConflict(t *testing.T) {
 	}
 	if len(acts) != 1 || acts[0].Kind != KindConflict || !strings.Contains(acts[0].Detail, "absolute") {
 		t.Fatalf("%+v, want conflict asking for an absolute path", acts)
+	}
+}
+
+func TestIgnoreExplicitlyEmptyExcludesFileIsConflict(t *testing.T) {
+	c := ignoreCfg(realTemp(t), map[string]string{}, "")
+	c.GitConfig = func(string) (string, bool, error) { return "", true, nil }
+	acts, err := planIgnore(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 || acts[0].Kind != KindConflict || !strings.Contains(acts[0].Detail, "empty") {
+		t.Fatalf("%+v, want conflict for an empty core.excludesFile", acts)
 	}
 }

@@ -56,8 +56,9 @@ type Config struct {
 	Home      string
 	SkillsDir string // resolved, absolute
 	Getenv    func(string) string
-	// GitConfig returns a global git config value with paths expanded, "" when unset.
-	GitConfig func(key string) (string, error)
+	// GitConfig returns a machine-wide git config value with paths expanded and
+	// whether the key is set at all (an empty value is not the same as unset).
+	GitConfig func(key string) (value string, set bool, err error)
 	LookPath  func(string) (string, error)
 	IsExec    func(string) bool
 }

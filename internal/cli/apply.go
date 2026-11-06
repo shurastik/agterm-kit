@@ -26,6 +26,7 @@ const (
 	settingsFile = "claude-settings.json"
 	rulesFile    = "applier-rules.md"
 	applierLog   = "applier.log"
+	startedFile  = "started" // in rounds/<k>/: the round was seen active
 )
 
 // Timeouts of the applier commands.
@@ -188,7 +189,22 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: e.handshake(ctx, id)})
+	started := e.handshake(ctx, id)
+	if started {
+		markStarted(dir, 1)
+	}
+	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: started})
+}
+
+// markStarted records that round k was seen active, so a later idle status
+// means its turn is over rather than not begun.
+func markStarted(dir string, k int) {
+	_ = fsx.ReplaceFile(filepath.Join(rundir.RoundDir(dir, k), startedFile), nil, 0o644)
+}
+
+func roundStarted(dir string, k int) bool {
+	_, err := os.Stat(filepath.Join(rundir.RoundDir(dir, k), startedFile))
+	return err == nil
 }
 
 // handshake waits for the new applier to report any agent status. When none
@@ -288,7 +304,31 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 		// Inline runs finished before start/send returned.
 		return e.printJSON(apply.Decide(run.round, report, "completed", nil))
 	}
-	status, werr := e.Ctl.Wait(ctx, companion, []string{"completed", "blocked", "idle"}, time.Duration(timeout)*time.Second)
+	limit := time.Duration(timeout) * time.Second
+	deadline := e.Now().Add(limit)
+	var status string
+	var werr error
+	if !roundStarted(run.dir, run.round) {
+		// Unconfirmed start (a trust prompt, a slow login): a fresh session's
+		// idle would read as "turn over". Wait for the round to begin; a first
+		// round may also already have ended (completed) or be asking (blocked).
+		until := []string{"active", "blocked"}
+		if run.round == 1 {
+			until = append(until, "completed")
+		}
+		status, werr = e.Ctl.Wait(ctx, companion, until, limit)
+		if status == "active" {
+			markStarted(run.dir, run.round)
+			status = ""
+		}
+	}
+	if werr == nil && status == "" {
+		left := deadline.Sub(e.Now())
+		if left < time.Second {
+			left = time.Second
+		}
+		status, werr = e.Ctl.Wait(ctx, companion, []string{"completed", "blocked", "idle"}, left)
+	}
 	if werr != nil && !errors.Is(werr, agterm.ErrGone) && !errors.Is(werr, agterm.ErrTimeout) {
 		return e.errorf("wait for applier %s: %v", companion, werr)
 	}
@@ -390,6 +430,8 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	}
 	if _, err := e.Ctl.Wait(ctx, companion, []string{"active"}, sendHandshake); err != nil {
 		fmt.Fprintf(e.Stderr, "agk: warning: applier %s did not report round %d as started: %v\n", companion, k, err)
+	} else {
+		markStarted(run.dir, k)
 	}
 	return e.printJSON(sendRound{Round: k})
 }

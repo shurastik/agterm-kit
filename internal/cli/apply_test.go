@@ -454,3 +454,65 @@ func TestApplyHelp(t *testing.T) {
 		}
 	}
 }
+
+// A round whose start was never confirmed (the handshake timed out, e.g. on a
+// trust prompt) must not read a fresh session's idle as "turn over".
+func TestApplyWaitBeforeTheRoundStarted(t *testing.T) {
+	h := newHarness(t, true)
+	root := repoWith(t, h, "")
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("start: exit %d: %s", code, h.err)
+	}
+	dir := applyDir(root)
+	if exists(filepath.Join(rundir.RoundDir(dir, 1), startedFile)) {
+		t.Fatal("an unconfirmed round must not be marked started")
+	}
+	h = newHarnessLike(t, h)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}, {Status: "completed"}}
+	n := 0
+	h.ctl.OnWait = func() {
+		if n++; n == 2 {
+			writeReport(t, dir, 1, doneReport)
+		}
+	}
+	if code := runApply(h, "wait", dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.out.String(), `"status":"done"`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	assertCalls(t, h.ctl,
+		agtermtest.Call{Method: "Wait", Args: []string{"COMP-1", "active,blocked,completed", "1h0m0s"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"COMP-1", "completed,blocked,idle", "1h0m0s"}},
+	)
+	if !exists(filepath.Join(rundir.RoundDir(dir, 1), startedFile)) {
+		t.Fatal("seeing active marks the round started")
+	}
+
+	// Still not started when the timeout passes: running, not no-report.
+	h = newHarnessLike(t, h)
+	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), startedFile))
+	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), apply.ReportFile))
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runApply(h, "wait", dir, "--timeout", "5"); code != 0 || !strings.Contains(h.out.String(), `"status":"running"`) {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+}
+
+func TestApplyStartAndSendMarkRoundsStarted(t *testing.T) {
+	h := newHarness(t, true)
+	dir := startedApply(t, h, 1)
+	if !exists(filepath.Join(rundir.RoundDir(dir, 1), startedFile)) {
+		t.Fatal("round 1 confirmed by the start handshake")
+	}
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	msg := filepath.Join(t.TempDir(), "m.md")
+	os.WriteFile(msg, []byte("m"), 0o644)
+	if code := runApply(h, "send", dir, msg); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !exists(filepath.Join(rundir.RoundDir(dir, 2), startedFile)) {
+		t.Fatal("round 2 confirmed by the send handshake")
+	}
+}

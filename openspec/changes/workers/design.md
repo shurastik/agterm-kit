@@ -91,9 +91,14 @@ reads `session text` (last 20 lines, sanitised with termsafe) into a stderr warn
    - `ErrGone` → `cancelled`.
    - Timeout → `running`.
 
-Waiting on `idle` is safe here because the send/start handshake already saw `active` for this
-round. `completed --auto-reset` therefore cannot be missed. The worst case is that the reset
-already happened, and then `idle` matches.
+Waiting on `idle` is safe only once the round was seen `active`. The start and send handshakes
+record that as `rounds/<k>/started`. `completed --auto-reset` therefore cannot be missed: the worst
+case is that the reset already happened, and then `idle` matches.
+
+When a round has no `started` marker, `wait` first waits for `active` (round 1 also accepts
+`completed` or `blocked`), marks the round, and only then waits for the end. This covers a start
+handshake that timed out, for example on a trust prompt. The live smoke test caught the gap: without
+the marker, a fresh session's `idle` read as `no-report`.
 
 ### D5. Guardrails per harness
 **Claude applier:**

@@ -1,3 +1,3 @@
 module github.com/shurastik/agterm-kit
 
-go 1.27.3
+go 1.26.0

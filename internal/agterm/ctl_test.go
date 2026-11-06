@@ -3,6 +3,8 @@ package agterm
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -198,25 +200,82 @@ func TestResolveBin(t *testing.T) {
 	}
 }
 
-// Cancelling while the page is open must close that page: it belongs to the
-// agterm app and would otherwise outlive agk and block the next triage.
-func TestOverlayHTMLCancelClosesPage(t *testing.T) {
+// scripted answers per call and can cancel the context mid-call.
+type scripted struct {
+	calls   [][]string
+	ctxErrs []error
+	answer  func(ctx context.Context, args []string) Result
+}
+
+func (s *scripted) run(ctx context.Context, _ string, args []string) (Result, error) {
+	s.calls = append(s.calls, append([]string(nil), args...))
+	s.ctxErrs = append(s.ctxErrs, ctx.Err())
+	return s.answer(ctx, args), nil
+}
+
+func treeWith(session, file string) string {
+	return `{"windows":[{"workspaces":[{"sessions":[{"id":"` + session + `","htmlOverlays":[{"file":"` + file + `"}]}]}]}]}`
+}
+
+func TestOverlayHTMLCancelledBeforeOpenTouchesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	s := &stubExec{code: -1}
-	c := &CLI{Bin: "agtermctl", Socket: "/s", Exec: s.run}
-	_, err := c.OverlayHTML(ctx, "S-1", "/f.html")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
+	s := &scripted{answer: func(context.Context, []string) Result { return Result{} }}
+	c := &CLI{Bin: "agtermctl", Exec: s.run}
+	if _, err := c.OverlayHTML(ctx, "S-1", "/f.html"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
 	}
-	if len(s.calls) != 2 {
-		t.Fatalf("calls = %v", s.calls)
+	if len(s.calls) != 0 {
+		t.Fatalf("an existing overlay must be left alone, calls = %q", s.calls)
 	}
-	want := []string{"session", "overlay", "close", "--target", "S-1", "--socket", "/s"}
-	if !reflect.DeepEqual(s.calls[1].args, want) {
-		t.Fatalf("close args = %q", s.calls[1].args)
-	}
-	if s.ctxErrs[1] != nil {
-		t.Fatal("close must run on a context detached from the cancelled one")
+}
+
+// Cancelling while our page is open closes it: the page belongs to the agterm
+// app and would otherwise outlive agk and block the next triage.
+func TestOverlayHTMLCancelClosesOwnPage(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	file := filepath.Join(dir, "triage.html")
+	os.WriteFile(file, nil, 0o644)
+	for name, tc := range map[string]struct {
+		shown     string
+		wantClose bool
+	}{
+		"own page":     {file, true},
+		"foreign page": {filepath.Join(dir, "other.html"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			s := &scripted{answer: func(_ context.Context, args []string) Result {
+				switch args[1] {
+				case "overlay":
+					if args[2] == "open" {
+						cancel() // user hits Ctrl-C while the page is up
+						return Result{ExitCode: -1}
+					}
+					return Result{Stdout: []byte("ok")}
+				default: // tree
+					return Result{Stdout: []byte(treeWith("S-1", tc.shown))}
+				}
+			}}
+			c := &CLI{Bin: "agtermctl", Socket: "/s", Exec: s.run}
+			if _, err := c.OverlayHTML(ctx, "S-1", file); !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v", err)
+			}
+			closed := false
+			for i, a := range s.calls {
+				if strings.Join(a[:3], " ") == "session overlay close" {
+					closed = true
+					if !reflect.DeepEqual(a, []string{"session", "overlay", "close", "--target", "S-1", "--socket", "/s"}) {
+						t.Errorf("close args = %q", a)
+					}
+					if s.ctxErrs[i] != nil {
+						t.Error("close must run on a detached context")
+					}
+				}
+			}
+			if closed != tc.wantClose {
+				t.Fatalf("closed = %v, want %v; calls %q", closed, tc.wantClose, s.calls)
+			}
+		})
 	}
 }

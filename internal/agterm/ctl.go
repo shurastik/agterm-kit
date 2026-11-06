@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -160,13 +161,18 @@ type Outcome struct {
 // target, and blocks until the page submits (Outcome) or is closed
 // (ErrDismissed). The page gets no file access.
 func (c *CLI) OverlayHTML(ctx context.Context, target, file string) (Outcome, error) {
+	if err := ctx.Err(); err != nil {
+		return Outcome{}, err // never opened: leave whatever overlay is there alone
+	}
 	res, err := c.run(ctx, "session", "overlay", "open", "--html", file, "--js", "--block", "--follow", "--target", target)
 	if ctx.Err() != nil {
 		// The page belongs to the agterm app and outlives the killed agtermctl;
-		// close it so a later submit is not lost and the next overlay can open.
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		// close it, but only if the overlay shown is still our page.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_, _ = c.run(closeCtx, "session", "overlay", "close", "--target", target)
+		if c.showsFile(cleanup, target, file) {
+			_, _ = c.run(cleanup, "session", "overlay", "close", "--target", target)
+		}
 		return Outcome{}, ctx.Err()
 	}
 	if err != nil {
@@ -193,6 +199,65 @@ func (c *CLI) OverlayHTML(ctx context.Context, target, file string) (Outcome, er
 		return Outcome{Value: v}, nil
 	}
 	return Outcome{}, fmt.Errorf("agtermctl session overlay: exit %d with unexpected response %s", res.ExitCode, strings.TrimSpace(string(res.Stdout)))
+}
+
+// showsFile reports whether target currently shows an HTML overlay of file.
+func (c *CLI) showsFile(ctx context.Context, target, file string) bool {
+	res, err := c.runOK(ctx, "tree", "--json")
+	if err != nil {
+		return false
+	}
+	var tree any
+	if json.Unmarshal(res.Stdout, &tree) != nil {
+		return false
+	}
+	want := canonical(file)
+	for _, f := range overlayFiles(tree, target) {
+		if canonical(f) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// overlayFiles finds the session node with id target anywhere in the tree and
+// returns its htmlOverlays[].file values.
+func overlayFiles(node any, target string) []string {
+	switch n := node.(type) {
+	case map[string]any:
+		if n["id"] == target {
+			var out []string
+			list, _ := n["htmlOverlays"].([]any)
+			for _, o := range list {
+				if m, ok := o.(map[string]any); ok {
+					if f, ok := m["file"].(string); ok {
+						out = append(out, f)
+					}
+				}
+			}
+			return out
+		}
+		for _, v := range n {
+			if out := overlayFiles(v, target); out != nil {
+				return out
+			}
+		}
+	case []any:
+		for _, v := range n {
+			if out := overlayFiles(v, target); out != nil {
+				return out
+			}
+		}
+	}
+	return nil
+}
+
+// canonical resolves symlinks (agterm reports /tmp for /private/tmp).
+func canonical(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // Ctl is the slice of agterm that agk uses.

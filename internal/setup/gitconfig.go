@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -40,12 +41,15 @@ func gitConfigGet(scope, key string) (string, bool, error) {
 	return strings.TrimSpace(string(out)), true, nil
 }
 
-// noSystem parses GIT_CONFIG_NOSYSTEM like git's boolean env vars; unknown
-// values count as false (git rejects them, so the system config stays on).
+// noSystem parses GIT_CONFIG_NOSYSTEM like git's boolean env vars: true/yes/on
+// or any non-zero integer. Unknown values count as false (git rejects them, so
+// the system config stays on).
 func noSystem(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "on":
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "true", "yes", "on":
 		return true
 	}
-	return false
+	n, err := strconv.Atoi(v)
+	return err == nil && n != 0
 }

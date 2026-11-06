@@ -72,13 +72,13 @@ func TestGlobalGitConfigHonoursNoSystem(t *testing.T) {
 	os.WriteFile(system, []byte("[core]\n\texcludesFile = /etc/gitignore\n"), 0o644)
 	t.Setenv("GIT_CONFIG_GLOBAL", global)
 	t.Setenv("GIT_CONFIG_SYSTEM", system)
-	for _, v := range []string{"1", "true", "YES", "on"} {
+	for _, v := range []string{"1", "true", "YES", "on", "2", "-1"} {
 		t.Setenv("GIT_CONFIG_NOSYSTEM", v)
 		if got, set, err := GlobalGitConfig("core.excludesFile"); err != nil || set {
 			t.Errorf("NOSYSTEM=%s: got %q set %v, %v; want unset", v, got, set, err)
 		}
 	}
-	for _, v := range []string{"0", "false", "no", "off", ""} {
+	for _, v := range []string{"0", "false", "no", "off", "", "00"} {
 		t.Setenv("GIT_CONFIG_NOSYSTEM", v)
 		if got, _, err := GlobalGitConfig("core.excludesFile"); err != nil || got != "/etc/gitignore" {
 			t.Errorf("NOSYSTEM=%q: got %q, %v; want system value", v, got, err)

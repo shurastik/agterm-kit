@@ -83,8 +83,8 @@ the Cellar, so it is not reliable).
 ### D5. `internal/setup`: plan, then apply
 
 `setup.Plan(cfg) ([]Action, error)` refuses a skills directory without `agk-*` skills (it
-would plan every installed link as stale) or one that resolves to an agent's own skills directory
-(links into itself), then inspects the filesystem with `Lstat`/`Readlink` and returns
+would plan every installed link as stale) or one that resolves to an agent's own skills directory, or
+whose skill links pass through one (each would be linked to itself), then inspects the filesystem with `Lstat`/`Readlink` and returns
 actions with a kind (`ok`, `create`, `repoint`, `remove`, `conflict`, `skip`, `append`,
 `missing`, `found`). `setup.Apply(actions)` performs the mutating ones. `--dry-run` prints the
 plan and stops. `cfg` carries the home directory, `getenv`, a `lookPath` and a `gitConfig` func,
@@ -106,8 +106,8 @@ names matching `agk-*` plus the literal legacy name `agterm-codex-review`.
 ### D7. Excludes file
 
 Path: `core.excludesFile` from `git config --global --includes --path`, else from `--system`
-(git's own precedence outside a repository; skipped when `GIT_CONFIG_NOSYSTEM` is true, as git
-does), via the injected `gitConfig`; `--includes` because
+(git's own precedence outside a repository; skipped when `GIT_CONFIG_NOSYSTEM` is true by git's
+boolean rules, non-zero integers included), via the injected `gitConfig`; `--includes` because
 `--global`/`--system` skip `[include]` files by default, `--path` expands `~`. Unset, else
 `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`. `.agk/` counts as ignored only when
 a literal `.agk`, `.agk/`, `/.agk` or `/.agk/` rule (trailing, not leading, whitespace trimmed as

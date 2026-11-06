@@ -206,3 +206,19 @@ func TestApplyExcludesLinkInsideSymlinkedDir(t *testing.T) {
 		t.Fatalf("lexical path written: %v", err)
 	}
 }
+
+func TestPlanRejectsSkillLinkedFromAgentDir(t *testing.T) {
+	e := newLinkEnv(t)
+	installed := filepath.Join(e.home, ".claude", "skills", "agk-review")
+	symlink(t, filepath.Join(e.skills, "agk-review"), installed) // installed from the package
+	src := mkdir(t, e.home, "src")
+	symlink(t, installed, filepath.Join(src, "agk-review")) // new source points back at the install
+	c := fullCfg(e)
+	c.SkillsDir = src
+	if _, err := Plan(c); err == nil || !strings.Contains(err.Error(), "agent skills directory") {
+		t.Fatalf("err = %v", err)
+	}
+	if got, _ := os.Readlink(installed); got != filepath.Join(e.skills, "agk-review") {
+		t.Fatalf("installed link changed: %q", got)
+	}
+}

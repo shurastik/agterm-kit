@@ -114,30 +114,45 @@ func appendIgnore(path string) error {
 // followLinks resolves a chain of symlinks at path, allowing the final target
 // (and its directories) not to exist yet, unlike filepath.EvalSymlinks.
 func followLinks(path string) (string, error) {
+	hops, err := linkChain(path)
+	if err != nil {
+		return "", err
+	}
+	return hops[len(hops)-1], nil
+}
+
+// linkChain returns every path a symlink chain visits, starting with path; each
+// hop after the first has a physical (symlink-free) directory. The last element
+// is not a symlink and may not exist.
+func linkChain(path string) ([]string, error) {
+	hops := []string{path}
 	for range 40 {
 		fi, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
-			return path, nil
+			return hops, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if fi.Mode()&fs.ModeSymlink == 0 {
-			return path, nil
+			return hops, nil
 		}
 		next, err := os.Readlink(path)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if !filepath.IsAbs(next) {
 			// Relative to the link's physical directory, which exists since the link does.
 			dir, err := filepath.EvalSymlinks(filepath.Dir(path))
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			next = filepath.Join(dir, next)
+		} else if dir, err := filepath.EvalSymlinks(filepath.Dir(next)); err == nil {
+			next = filepath.Join(dir, filepath.Base(next))
 		}
 		path = next
+		hops = append(hops, path)
 	}
-	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
+	return nil, fmt.Errorf("%s: too many levels of symbolic links", path)
 }

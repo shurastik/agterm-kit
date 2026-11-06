@@ -139,10 +139,32 @@ func (c Config) checkSource() error {
 	if err != nil {
 		return err
 	}
+	agentDirs := map[string]string{} // physical skills dir -> agent name
 	for _, ag := range c.agents() {
-		dst, err := filepath.EvalSymlinks(filepath.Join(ag.dir, "skills"))
-		if err == nil && dst == src {
-			return fmt.Errorf("%s is the %s agent skills directory, not an agk skills source", c.SkillsDir, ag.name)
+		if dst, err := filepath.EvalSymlinks(filepath.Join(ag.dir, "skills")); err == nil {
+			agentDirs[dst] = ag.name
+		}
+	}
+	if name, ok := agentDirs[src]; ok {
+		return fmt.Errorf("%s is the %s agent skills directory, not an agk skills source", c.SkillsDir, name)
+	}
+	// A skill reached through a link inside an agent skills dir would be linked to itself.
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "agk-") {
+			continue
+		}
+		hops, err := linkChain(filepath.Join(src, e.Name()))
+		if err != nil {
+			continue // a broken skill is skipped by skills() anyway
+		}
+		for _, hop := range hops {
+			if name, ok := agentDirs[filepath.Dir(hop)]; ok {
+				return fmt.Errorf("skill %s resolves through the %s agent skills directory (%s)", e.Name(), name, hop)
+			}
 		}
 	}
 	return nil

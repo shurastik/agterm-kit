@@ -26,19 +26,59 @@ type reporter struct {
 // review's context so a cancelled run still reports blocked.
 const statusTimeout = 5 * time.Second
 
+// statusAttempts and statusRetryDelay govern final-status retries: a lost
+// completed/blocked would leave `session wait` hanging.
+var (
+	statusAttempts   = 3
+	statusRetryDelay = 500 * time.Millisecond
+)
+
 func (r reporter) set(ctx context.Context, state, line string) {
 	if r.target == "" {
 		return
 	}
+	attempts := 1
+	if state == "completed" || state == "blocked" {
+		attempts = statusAttempts
+	}
+	for i := 1; ; i++ {
+		err := r.update(ctx, state, line)
+		if err == nil {
+			return
+		}
+		// Status is best effort: a broken socket must not abort the review.
+		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
+		if i >= attempts {
+			return
+		}
+		time.Sleep(statusRetryDelay)
+	}
+}
+
+func (r reporter) update(ctx context.Context, state, line string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
 	defer cancel()
-	// Status is best effort: a broken socket must not abort the review.
 	if err := r.env.Ctl.Status(ctx, r.target, state); err != nil {
-		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
+		return err
 	}
-	if err := r.env.Ctl.Info(ctx, r.target, line); err != nil {
-		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
+	return r.env.Ctl.Info(ctx, r.target, line)
+}
+
+// runResult is <run dir>/result.json, the outcome on disk for callers whose
+// `session wait` timed out.
+type runResult struct {
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	Findings int    `json:"findings"`
+	Verdict  string `json:"verdict,omitempty"`
+}
+
+func writeResult(dir string, r runResult) error {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
 	}
+	return fsx.ReplaceFile(filepath.Join(dir, "result.json"), append(b, '\n'), 0o644)
 }
 
 // ReviewRun implements `agk review run <dir>`: the process inside the companion.
@@ -54,7 +94,13 @@ func (e *Env) ReviewRun(ctx context.Context, args []string) int {
 // runReview runs codex for a prepared run dir and records the outcome.
 func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep reporter) int {
 	num := 0 // review number; 0 until known
+	recordable := false
 	fail := func(reason string, err error) int {
+		if recordable {
+			if werr := writeResult(dir, runResult{Status: "blocked", Reason: reason}); werr != nil {
+				fmt.Fprintf(e.Stderr, "agk: warning: %v\n", werr)
+			}
+		}
 		rep.set(ctx, "blocked", review.FailureLine(num, reason))
 		return e.errorf("%s: %v", reason, err)
 	}
@@ -69,6 +115,7 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if num, err = review.RunNumber(dir); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
+	recordable = true // dir is a verified run dir from here on
 	prompt, err := os.ReadFile(filepath.Join(dir, "prompt.md"))
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
@@ -92,6 +139,9 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 		return fail(review.ReasonSetupFailed, err)
 	}
 	if err := fsx.ReplaceFile(filepath.Join(dir, "review.json"), append(b, '\n'), 0o644); err != nil {
+		return fail(review.ReasonSetupFailed, err)
+	}
+	if err := writeResult(dir, runResult{Status: "completed", Findings: len(r.Findings), Verdict: r.Verdict}); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
 	rep.set(ctx, "completed", review.SummaryLine(num, r))

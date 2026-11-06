@@ -28,11 +28,16 @@ Runs a codex code review of a git diff as a visible agterm companion session und
 - **THEN** the command exits with a non-zero status, prints `nothing to review` to stderr, and no companion session appears
 
 ### Requirement: Run directory
-Each review SHALL get a new run directory `.agk/reviews/<timestamp>/` under the repository root holding the prompt (`prompt.md`), the codex log (`codex.log`) and, on success, the findings file (`review.json`).
+Each review SHALL get a new run directory `.agk/reviews/<timestamp>/` under the repository root holding the prompt (`prompt.md`), the codex log (`codex.log`), the outcome (`result.json` with `status` `completed` or `blocked`, written before the final agterm status) and, on success, the findings file (`review.json`).
 
 #### Scenario: Run directory contents after a successful review
 - **WHEN** a review finishes successfully
-- **THEN** its run directory contains `prompt.md`, `codex.log` and `review.json`
+- **THEN** its run directory contains `prompt.md`, `codex.log`, `review.json` and `result.json` with status `completed`
+
+#### Scenario: Outcome survives a lost status update
+- **GIVEN** the final status update to agterm fails
+- **WHEN** the review finishes
+- **THEN** the update is retried, and `result.json` records the outcome regardless
 
 #### Scenario: Two reviews do not collide
 - **WHEN** two reviews are started one after another in the same repository

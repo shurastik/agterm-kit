@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -186,5 +187,61 @@ func TestReviewRunPrintsTimestampedHeader(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "[2026-11-05 10:00:00] agk: review #1: 3 finding(s)") {
 		t.Fatalf("footer missing:\n%s", h.out)
+	}
+}
+
+// A lost final status would leave `session wait` hanging: retry it, and record
+// the outcome on disk so a timed-out wait can still learn it.
+func TestReviewRunRetriesFinalStatusAndRecordsResult(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := runDir(t)
+	h.runner.output = threeFindings
+	fails := 2
+	h.ctl.OnStatus = func(state string) error {
+		if state == "completed" && fails > 0 {
+			fails--
+			return errors.New("socket hiccup")
+		}
+		return nil
+	}
+	if code := h.env.ReviewRun(context.Background(), []string{dir}); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	n := 0
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Status" && c.Args[1] == "completed" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Fatalf("completed attempts = %d, want 3", n)
+	}
+	assertResult(t, dir, "completed", 3)
+}
+
+func TestReviewRunRecordsBlockedResult(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := runDir(t)
+	h.runner.err = errors.New("codex failed: exit status 1")
+	h.env.ReviewRun(context.Background(), []string{dir})
+	assertResult(t, dir, "blocked", 0)
+}
+
+func assertResult(t *testing.T, dir, status string, findings int) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Status   string `json:"status"`
+		Reason   string `json:"reason"`
+		Findings int    `json:"findings"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil || r.Status != status || r.Findings != findings {
+		t.Fatalf("result.json = %s (%v)", b, err)
+	}
+	if status == "blocked" && r.Reason == "" {
+		t.Fatal("blocked result needs a reason")
 	}
 }

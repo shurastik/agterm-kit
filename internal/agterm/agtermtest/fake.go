@@ -30,6 +30,8 @@ type Fake struct {
 	InfoErr      error
 	Outcome      agterm.Outcome
 	OverlayErr   error
+	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
+	OnStatus func(state string) error
 	// OnOverlay, when set, runs before OverlayHTML returns (e.g. to read the page file).
 	OnOverlay func(file string)
 }
@@ -61,6 +63,9 @@ func (f *Fake) NewCompanion(ctx context.Context, parent, name, command, cwd stri
 
 func (f *Fake) Status(ctx context.Context, target, state string) error {
 	f.record(ctx, "Status", target, state)
+	if f.OnStatus != nil {
+		return f.OnStatus(state)
+	}
 	return f.StatusErr
 }
 

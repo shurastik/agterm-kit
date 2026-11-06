@@ -27,7 +27,7 @@ session, and hands back structured findings plus the user's per-finding decision
 2. **Wait** in the background (Bash `run_in_background: true`), never poll:
    ```bash
    A="${AGTERMCTL:-/Applications/agterm.app/Contents/MacOS/agtermctl}"; [ -x "$A" ] || A=agtermctl
-   "$A" session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked
+   "$A" session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked --timeout 1800
    ```
    (Same binary order as `agk`: `$AGTERMCTL`, the app bundle, then `agtermctl` on PATH.
    `agtermctl` ignores `$AGTERM_SOCKET` unless it is passed as `--socket`.)
@@ -35,6 +35,10 @@ session, and hands back structured findings plus the user's per-finding decision
    - prints `blocked`: the review failed. Read `<dir>/codex.log` (and `<dir>/codex-output.json` if
      present), tell the user the reason, fix the cause if it is on our side, and restart at step 1.
    - exit 2: the companion was closed. Treat as cancelled; ask the user before restarting.
+   - exit 124 (timeout) or any doubt: read `<dir>/result.json`, which agk writes before setting the
+     final status: `{"status":"completed",...}` → step 3, `{"status":"blocked","reason":...}` → as
+     `blocked` above. No `result.json` yet means the review is still running: tell the user and
+     wait again.
 
 3. **Triage**:
    ```bash

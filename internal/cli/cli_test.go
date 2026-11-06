@@ -44,6 +44,9 @@ type harness struct {
 
 func newHarness(t *testing.T, inAgterm bool) *harness {
 	t.Helper()
+	old := statusRetryDelay
+	statusRetryDelay = 0
+	t.Cleanup(func() { statusRetryDelay = old })
 	h := &harness{
 		ctl:    &agtermtest.Fake{CompanionID: "COMP-1"},
 		runner: &fakeRunner{},

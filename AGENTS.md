@@ -13,11 +13,23 @@ the decisions back to the agent as JSON.
 
 ```bash
 go build -o .bin/agk ./cmd/agk   # Build binary
-go install ./cmd/agk             # Install to $GOBIN
 go test ./...                    # Unit tests
 go vet ./...                     # Vet
 go mod tidy                      # Sync deps
 ```
+
+## Install
+
+```bash
+brew install shurastik/tap/agk   # binary + skills in $(brew --prefix)/opt/agk/share/agk/skills
+agk setup                        # link agk-* skills into ~/.claude/skills and ~/.codex/skills,
+                                 # add .agk/ to the global git ignore, check dependencies
+```
+
+Rerun `agk setup` after every `brew upgrade agk`; it is idempotent (`--dry-run` previews).
+Dev loop from a checkout: `go build -o .bin/agk ./cmd/agk && .bin/agk setup --skills-dir ./skills`.
+Release: `scripts/release.sh X.Y.Z` tags, then renders `packaging/homebrew/agk.rb.tmpl` into the
+tap checkout (`$AGK_TAP_DIR`, default `~/Projects/homebrew-tap`) and pushes it.
 
 ## Usage
 
@@ -26,11 +38,11 @@ agk review start [--base main]   # spawn the "codex-review #N" companion; prints
 agk review wait <dir>            # prints {"status":"completed|blocked|cancelled|running",...};
                                  # closes the companion after a completed review
 agk triage <dir>/review.json     # optional overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
+agk setup [--skills-dir DIR] [--dry-run]
+agk version
 ```
 
-The agent-facing workflow lives in `skill/agterm-codex-review/SKILL.md`, installed with
-`ln -sfn ~/Projects/agterm-kit/skill/agterm-codex-review ~/.claude/skills/agterm-codex-review`.
-Reviewed repos should gitignore `.agk/`.
+The agent-facing workflow lives in `skills/agk-review/SKILL.md`.
 
 ## Layout
 
@@ -41,9 +53,13 @@ Reviewed repos should gitignore `.agk/`.
 | `internal/review/` | Prompt from git diff, codex runner, review JSON parse/validate, run dir |
 | `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Runner, Collect, clock) |
 | `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
+| `internal/setup/` | `agk setup`: skills dir resolution, link/ignore/dependency plan, apply |
+| `internal/buildinfo/` | `Version`, stamped with `-ldflags -X` at release |
 | `internal/triage/` | HTML triage page (`html/template` + embedded CSS/JS) and outcome parsing |
 | `assets/` | Embedded files (review output schema, review prompt template) |
-| `skill/` | Claude skill telling the agent how to use `agk`; symlinked into `~/.claude/skills/` |
+| `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
+| `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
+| `scripts/` | `release.sh`: tag a version and bump the tap formula |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` of the reviewed repo (gitignored here).
 

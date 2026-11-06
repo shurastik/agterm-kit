@@ -17,6 +17,10 @@ Usage:
                                   {"status":"completed|blocked|cancelled|running",...}; closes the
                                   companion after a completed review.
   agk triage <review.json>        Triage findings in an agterm overlay; prints decisions JSON.
+  agk setup [--skills-dir DIR] [--dry-run]
+                                  Link the agk-* skills for Claude Code and Codex, add .agk/ to the
+                                  global git ignore, check dependencies. Rerun after every upgrade.
+  agk version                     Print the agk version.
 
 Exit codes: 0 ok, 1 error, 2 dismissed by the user, 3 no agterm UI (fallback output printed).
 `
@@ -41,6 +45,10 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return e.reviewCmd(ctx, args[1:])
 	case "triage":
 		return e.Triage(ctx, args[1:])
+	case "setup":
+		return e.Setup(args[1:])
+	case "version":
+		return e.Version(args[1:])
 	}
 	fmt.Fprintf(e.Stderr, "agk: unknown command %q\n\n%s", args[0], usage)
 	return ExitError

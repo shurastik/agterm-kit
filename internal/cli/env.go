@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/review"
+	"github.com/shurastik/agterm-kit/internal/setup"
 )
 
 // Exit codes shared by all commands.
@@ -30,11 +32,21 @@ type Env struct {
 	Now            func() time.Time
 	Executable     func() (string, error)
 	Cwd            string
+
+	// Machine wiring for agk setup.
+	Home      string
+	LookPath  func(string) (string, error)
+	GitConfig func(key string) (string, error)
+	IsExec    func(string) bool
 }
 
 // NewEnv returns the production environment.
 func NewEnv() (*Env, error) {
 	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +60,10 @@ func NewEnv() (*Env, error) {
 		Now:        time.Now,
 		Executable: os.Executable,
 		Cwd:        cwd,
+		Home:       home,
+		LookPath:   exec.LookPath,
+		GitConfig:  setup.GlobalGitConfig,
+		IsExec:     isExecutable,
 	}, nil
 }
 
@@ -62,4 +78,9 @@ func (e *Env) session() string {
 func (e *Env) errorf(format string, args ...any) int {
 	fmt.Fprintf(e.Stderr, "agk: "+format+"\n", args...)
 	return ExitError
+}
+
+func isExecutable(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0
 }

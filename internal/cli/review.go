@@ -14,6 +14,7 @@ import (
 
 	"github.com/shurastik/agterm-kit/internal/fsx"
 	"github.com/shurastik/agterm-kit/internal/review"
+	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
 // reporter mirrors review progress into agterm status; a no-op outside agterm.
@@ -112,7 +113,7 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	if num, err = review.RunNumber(dir); err != nil {
+	if num, err = rundir.Number(dir); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
 	recordable = true // dir is a verified run dir from here on
@@ -228,7 +229,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 			return e.errorf("%v", err)
 		}
 	}
-	dir, err := review.NewRunDir(scope.Root, e.Now())
+	dir, err := rundir.New(scope.Root, rundir.Reviews, e.Now())
 	if err != nil {
 		return e.errorf("create run dir: %v", err)
 	}
@@ -248,7 +249,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	num, err := review.RunNumber(dir)
+	num, err := rundir.Number(dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}

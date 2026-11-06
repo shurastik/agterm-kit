@@ -35,6 +35,17 @@ type Fake struct {
 	WaitStatus   string
 	WaitErr      error
 	CloseErr     error
+	TypeErr      error
+	TextOut      string
+	TextErr      error
+	MsgSendErr   error
+	// WaitSeq, when non-empty, scripts successive Wait calls; each call pops
+	// the first entry. When it runs out, WaitStatus and WaitErr apply.
+	WaitSeq []WaitResult
+	// OnType, when set, runs before Type returns.
+	OnType func(target, text string)
+	// OnMsgRead, when set, answers MsgRead; otherwise it returns ErrTimeout.
+	OnMsgRead func() ([]agterm.Message, error)
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
 	// OnWait, when set, runs before Wait returns (e.g. to write result.json).
@@ -94,13 +105,54 @@ func (f *Fake) OverlayHTML(ctx context.Context, target, file string) (agterm.Out
 	return f.Outcome, f.OverlayErr
 }
 
+// WaitResult is one scripted Wait answer.
+type WaitResult struct {
+	Status string
+	Err    error
+}
+
 // Wait records target, the joined statuses and the timeout.
 func (f *Fake) Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error) {
 	f.record(ctx, "Wait", target, strings.Join(until, ","), timeout.String())
 	if f.OnWait != nil {
 		f.OnWait()
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.WaitSeq) > 0 {
+		r := f.WaitSeq[0]
+		f.WaitSeq = f.WaitSeq[1:]
+		return r.Status, r.Err
+	}
 	return f.WaitStatus, f.WaitErr
+}
+
+func (f *Fake) Type(ctx context.Context, target, text string) error {
+	f.record(ctx, "Type", target, text)
+	if f.OnType != nil {
+		f.OnType(target, text)
+	}
+	return f.TypeErr
+}
+
+// Text records target and the line count.
+func (f *Fake) Text(ctx context.Context, target string, lines int) (string, error) {
+	f.record(ctx, "Text", target, fmt.Sprint(lines))
+	return f.TextOut, f.TextErr
+}
+
+func (f *Fake) MsgSend(ctx context.Context, to, body string) error {
+	f.record(ctx, "MsgSend", to, body)
+	return f.MsgSendErr
+}
+
+// MsgRead records the timeout.
+func (f *Fake) MsgRead(ctx context.Context, timeout time.Duration) ([]agterm.Message, error) {
+	f.record(ctx, "MsgRead", timeout.String())
+	if f.OnMsgRead != nil {
+		return f.OnMsgRead()
+	}
+	return nil, agterm.ErrTimeout
 }
 
 func (f *Fake) Close(ctx context.Context, target string) error {

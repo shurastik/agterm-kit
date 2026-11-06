@@ -2,8 +2,8 @@
 
 ## 1. Run directories and agterm primitives
 
-- [ ] 1.1 Move run-dir creation and numbering into `internal/rundir` (`New(root, kind, now)` for `reviews` and `applies`, `Number(dir)`), plus read/write helpers for `worker.json`, `round` and `rounds/<k>/` per design D9; verify with tests ported from `review/rundir_test.go`, plus numbering per kind and round round-trips
-- [ ] 1.2 Add `Type`, `Text`, `MsgSend`, `MsgRead` to `agterm.Ctl`, `agterm.CLI` and the fake, and widen `Wait` to accept `idle`/`active`. `MsgRead` uses `--wait --ack --json` as the caller's own pane. Verify with argv tests (always `--target`/`--socket`, `--stdin` for typed text, the `--to SESSION:PANE` form) and response-parsing tests, including exit 124 and 2 for wait
+- [x] 1.1 Move run-dir creation and numbering into `internal/rundir` (`New(root, kind, now)` for `reviews` and `applies`, `Number(dir)`), plus read/write helpers for `worker.json`, `round` and `rounds/<k>/` per design D9; verify with tests ported from `review/rundir_test.go`, plus numbering per kind and round round-trips
+- [x] 1.2 Add `Type`, `Text`, `MsgSend`, `MsgRead` to `agterm.Ctl`, `agterm.CLI` and the fake, and widen `Wait` to accept `idle`/`active`. `MsgRead` uses `--wait --ack --json` as the caller's own pane. Verify with argv tests (always `--target`/`--socket`, `--stdin` for typed text, the `--to SESSION:PANE` form) and response-parsing tests, including exit 124 and 2 for wait
 
 ## 2. Worker configuration (`internal/config`, `agk config`)
 

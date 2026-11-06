@@ -280,6 +280,10 @@ type Ctl interface {
 	OverlayHTML(ctx context.Context, target, file string) (Outcome, error)
 	Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error)
 	Close(ctx context.Context, target string) error
+	Type(ctx context.Context, target, text string) error
+	Text(ctx context.Context, target string, lines int) (string, error)
+	MsgSend(ctx context.Context, to, body string) error
+	MsgRead(ctx context.Context, timeout time.Duration) ([]Message, error)
 }
 
 var _ Ctl = (*CLI)(nil)

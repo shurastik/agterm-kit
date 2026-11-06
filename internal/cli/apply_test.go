@@ -117,7 +117,9 @@ func TestApplyStartRefusals(t *testing.T) {
 		"not kebab-case": {"Add_Auth", nil, "kebab-case"},
 		"flag-like":      {"-x", nil, ""},
 		"all done":       {"add-auth", func(context.Context, string, string) (string, string, error) { return "all_done", "", nil }, "nothing to apply"},
-		"blocked":        {"add-auth", func(context.Context, string, string) (string, string, error) { return "blocked", "missing artifacts: specs", nil }, "missing artifacts: specs"},
+		"blocked": {"add-auth", func(context.Context, string, string) (string, string, error) {
+			return "blocked", "missing artifacts: specs", nil
+		}, "missing artifacts: specs"},
 		"unknown change": {"no-such", func(context.Context, string, string) (string, string, error) {
 			return "", "", errors.New(`Change "no-such" not found`)
 		}, "not found"},

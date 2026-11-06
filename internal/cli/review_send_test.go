@@ -89,7 +89,9 @@ func TestReviewSendRefusals(t *testing.T) {
 	}{
 		"still running": {func(t *testing.T, h *tenv, dir string) { os.Remove(filepath.Join(dir, "rounds", "1", "result.json")) }, "still running"},
 		"nothing to review": {func(t *testing.T, h *tenv, dir string) {
-			h.env.Collect = func(context.Context, string, string) (review.Scope, error) { return review.Scope{}, review.ErrNothingToReview }
+			h.env.Collect = func(context.Context, string, string) (review.Scope, error) {
+				return review.Scope{}, review.ErrNothingToReview
+			}
 		}, "nothing to review"},
 		"pane unknown":  {func(t *testing.T, h *tenv, dir string) { os.Remove(filepath.Join(dir, paneFile)) }, "pane"},
 		"reviewer gone": {func(t *testing.T, h *tenv, dir string) { h.ctl.MsgSendErr = agterm.ErrGone }, "gone"},

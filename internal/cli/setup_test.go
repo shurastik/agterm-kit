@@ -24,10 +24,10 @@ func newSetupHarness(t *testing.T) *setupHarness {
 		t.Fatal(err)
 	}
 	s := &setupHarness{
-		tenv:    newHarness(t, false),
-		home:    filepath.Join(root, "home"),
-		skills:  filepath.Join(root, "skills"),
-		path:    map[string]bool{"git": true, "codex": true, "claude": true, "openspec": true, "agtermctl": true},
+		tenv:   newHarness(t, false),
+		home:   filepath.Join(root, "home"),
+		skills: filepath.Join(root, "skills"),
+		path:   map[string]bool{"git": true, "codex": true, "claude": true, "openspec": true, "agtermctl": true},
 	}
 	for _, d := range []string{
 		filepath.Join(s.home, ".claude"), filepath.Join(s.home, ".codex"), filepath.Join(s.skills, "agk-review"),

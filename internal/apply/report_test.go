@@ -10,7 +10,7 @@ import (
 
 func TestParseReport(t *testing.T) {
 	ok := map[string]Report{
-		`{"status":"done","summary":"s","progress":"5/7"}`: {Status: "done", Summary: "s", Progress: "5/7"},
+		`{"status":"done","summary":"s","progress":"5/7"}`:                              {Status: "done", Summary: "s", Progress: "5/7"},
 		`{"status":"blocked","summary":"s","problem":"p","artifact":"tasks","extra":1}`: {Status: "blocked", Summary: "s", Problem: "p", Artifact: "tasks"},
 	}
 	for in, want := range ok {

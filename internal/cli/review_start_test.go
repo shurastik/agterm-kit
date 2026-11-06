@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/shurastik/agterm-kit/internal/review"
+	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
 func scriptScope(h *tenv, root string) *[]string {
@@ -56,7 +57,7 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 		t.Fatalf("collect args = %q", *seen)
 	}
 	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
-	prompt, err := os.ReadFile(filepath.Join(dir, "prompt.md"))
+	prompt, err := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
 	if err != nil || !strings.Contains(string(prompt), "+x") {
 		t.Fatalf("prompt.md: %v %q", err, prompt)
 	}
@@ -79,8 +80,14 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	if out.Companion == nil || *out.Companion != "COMP-1" || out.Dir != dir {
 		t.Fatalf("stdout = %s", h.out)
 	}
-	if len(h.runner.calls) != 0 {
-		t.Fatal("start must not run codex itself inside agterm")
+	if len(h.drivers["codex"].turns) != 0 {
+		t.Fatal("start must not run the reviewer itself inside agterm")
+	}
+	if s := readState(t, dir); s.Worker.Harness != "codex" || s.Base != "develop" || s.Session != "" {
+		t.Fatalf("worker.json = %+v", s)
+	}
+	if k, err := rundir.Round(dir); err != nil || k != 1 {
+		t.Fatalf("round = %d, %v", k, err)
 	}
 	if id, err := os.ReadFile(filepath.Join(dir, "companion")); err != nil || string(id) != "COMP-1\n" {
 		t.Fatalf("companion file = %q, %v", id, err)
@@ -170,7 +177,7 @@ func TestReviewStartOutsideAgtermRunsInline(t *testing.T) {
 	h := newHarness(t, false)
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	scriptScope(h, root)
-	h.runner.output = threeFindings
+	h.drivers["codex"].outputs = []string{threeFindings}
 	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
@@ -182,9 +189,9 @@ func TestReviewStartOutsideAgtermRunsInline(t *testing.T) {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	if !strings.Contains(h.err.String(), "codex streaming") {
-		t.Fatal("codex output goes to stderr inline so stdout stays JSON")
+		t.Fatal("reviewer output goes to stderr inline so stdout stays JSON")
 	}
-	if !exists(filepath.Join(dir, "review.json")) {
+	if !exists(filepath.Join(dir, "rounds", "1", "review.json")) {
 		t.Fatal("review.json missing")
 	}
 	if exists(filepath.Join(dir, "companion")) {
@@ -195,7 +202,7 @@ func TestReviewStartOutsideAgtermRunsInline(t *testing.T) {
 func TestReviewStartOutsideAgtermFailure(t *testing.T) {
 	h := newHarness(t, false)
 	scriptScope(h, t.TempDir())
-	h.runner.err = errors.New("codex failed: boom")
+	h.drivers["codex"].errs = []error{errors.New("codex failed: boom")}
 	if code := h.env.ReviewStart(context.Background(), nil); code == 0 {
 		t.Fatal("want non-zero exit")
 	}
@@ -230,6 +237,7 @@ func TestReviewStartForwardsCodexHome(t *testing.T) {
 	h := newHarness(t, true)
 	h.vars["PATH"] = "/usr/bin"
 	h.vars["CODEX_HOME"] = "/custom/codex"
+	h.vars["CLAUDE_CONFIG_DIR"] = "/custom/claude"
 	h.vars["AGTERMCTL"] = "/opt/agterm/agtermctl"
 	h.vars["OPENAI_API_KEY"] = "sk-secret"
 	scriptScope(h, t.TempDir())
@@ -237,10 +245,50 @@ func TestReviewStartForwardsCodexHome(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	cmd := h.ctl.Calls[0].Args[2]
-	if !strings.HasPrefix(cmd, "env 'PATH=/usr/bin' 'CODEX_HOME=/custom/codex' 'AGTERMCTL=/opt/agterm/agtermctl' '/usr/local/bin/agk' review run ") {
+	if !strings.HasPrefix(cmd, "env 'PATH=/usr/bin' 'CODEX_HOME=/custom/codex' 'CLAUDE_CONFIG_DIR=/custom/claude' 'AGTERMCTL=/opt/agterm/agtermctl' '/usr/local/bin/agk' review run ") {
 		t.Fatalf("command = %q", cmd)
 	}
 	if strings.Contains(cmd, "sk-secret") {
 		t.Fatal("secrets must never be put on the companion command line")
+	}
+}
+
+func TestReviewStartClaudeReviewer(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude:claude-opus-5-5"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if name := h.ctl.Calls[0].Args[1]; name != "claude-review #1" {
+		t.Fatalf("companion name = %q", name)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	if s := readState(t, dir); s.Worker.Harness != "claude" || s.Worker.Model != "claude-opus-5-5" {
+		t.Fatalf("worker.json = %+v", s)
+	}
+}
+
+func TestReviewStartSameWorkerWarns(t *testing.T) {
+	h := newHarness(t, true)
+	scriptScope(h, t.TempDir())
+	if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.err.String(), "not independent") {
+		t.Fatalf("stderr = %q", h.err)
+	}
+}
+
+func TestReviewStartInvalidConfig(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	os.WriteFile(filepath.Join(root, ".agk.toml"), []byte("[reviewer]\nmodle = \"x\"\n"), 0o644)
+	if code := h.env.ReviewStart(context.Background(), nil); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.err.String(), "reviewer.modle") || exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+		t.Fatalf("stderr %q, calls %v", h.err, h.ctl.Calls)
 	}
 }

@@ -13,7 +13,27 @@ import (
 // Past it, codex is told to read the rest itself.
 const MaxPromptDiffBytes = 400 << 10
 
-var promptTmpl = template.Must(template.New("prompt").Parse(assets.ReviewPrompt))
+var (
+	promptTmpl   = template.Must(template.New("prompt").Parse(assets.ReviewPrompt))
+	rereviewTmpl = template.Must(template.New("rereview").Parse(assets.RereviewPrompt))
+)
+
+// RereviewPrompt renders the prompt for re-review round k of s, with the
+// author's optional note.
+func RereviewPrompt(s Scope, k int, note string) (string, error) {
+	body, err := Prompt(s)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if err := rereviewTmpl.Execute(&b, struct {
+		Round        int
+		Note, Review string
+	}{k, strings.TrimSpace(escapeInvalidUTF8(note)), body}); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
 
 type promptData struct {
 	Base, MergeBase, Stat, Diff string
@@ -22,7 +42,7 @@ type promptData struct {
 	Untracked                   []UntrackedFile
 }
 
-// Prompt renders the codex review prompt for s.
+// Prompt renders the review prompt for s.
 func Prompt(s Scope) (string, error) {
 	// Escape before budgeting: each invalid byte grows to four characters.
 	d := promptData{Base: s.Base, MergeBase: s.MergeBase, Stat: escapeInvalidUTF8(s.Stat), ReadRest: ReadRestCommand(s.MergeBase)}

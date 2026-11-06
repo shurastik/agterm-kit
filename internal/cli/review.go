@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shurastik/agterm-kit/internal/agterm"
+	"github.com/shurastik/agterm-kit/internal/config"
 	"github.com/shurastik/agterm-kit/internal/fsx"
 	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
@@ -66,69 +68,172 @@ func (r reporter) update(ctx context.Context, state, line string) error {
 	return r.env.Ctl.Info(ctx, r.target, line)
 }
 
-// runResult is <run dir>/result.json, the outcome on disk for callers whose
-// `session wait` timed out.
+// Run-dir files of a review.
+const (
+	workerFile = "worker.json" // reviewState
+	paneFile   = "pane"        // the reviewer loop's own pane id
+	reviewLog  = "reviewer.log"
+)
+
+// reviewState is worker.json: the configuration a review run is pinned to.
+type reviewState struct {
+	Worker  config.Worker `json:"worker"`
+	Base    string        `json:"base"`
+	Session string        `json:"session,omitempty"`
+}
+
+// runResult is rounds/<k>/result.json, the round's outcome on disk for
+// callers whose `session wait` timed out.
 type runResult struct {
 	Status   string `json:"status"`
+	Round    int    `json:"round"`
 	Reason   string `json:"reason,omitempty"`
 	Findings int    `json:"findings"`
 	Verdict  string `json:"verdict,omitempty"`
 }
 
-func writeResult(dir string, r runResult) error {
+func writeResult(rd string, r runResult) error {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
-	return fsx.ReplaceFile(filepath.Join(dir, "result.json"), append(b, '\n'), 0o644)
+	return fsx.ReplaceFile(filepath.Join(rd, "result.json"), append(b, '\n'), 0o644)
 }
 
-// ReviewRun implements `agk review run <dir>`: the process inside the companion.
-func (e *Env) ReviewRun(ctx context.Context, args []string) int {
-	rep := reporter{env: e, target: e.session()}
-	if len(args) != 1 {
-		rep.set(ctx, "blocked", review.FailureLine(0, review.ReasonSetupFailed))
-		return e.errorf("usage: agk review run <run-dir>")
-	}
-	return e.runReview(ctx, args[0], e.Stdout, rep)
+// reviewRun is a verified review run directory.
+type reviewRun struct {
+	dir, root string
+	num       int
+	state     reviewState
 }
 
-// runReview runs codex for a prepared run dir and records the outcome.
-func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep reporter) int {
-	num := 0 // review number; 0 until known
-	recordable := false
-	fail := func(reason string, err error) int {
-		if recordable {
-			if werr := writeResult(dir, runResult{Status: "blocked", Reason: reason}); werr != nil {
-				fmt.Fprintf(e.Stderr, "agk: warning: %v\n", werr)
-			}
-		}
-		rep.set(ctx, "blocked", review.FailureLine(num, reason))
-		return e.errorf("%s: %v", reason, err)
-	}
+func loadReviewRun(dir string) (reviewRun, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return fail(review.ReasonSetupFailed, err)
+		return reviewRun{}, err
 	}
-	root, err := runRoot(dir)
+	root, err := rundir.Root(dir, rundir.Reviews)
+	if err != nil {
+		return reviewRun{}, err
+	}
+	num, err := rundir.Number(dir)
+	if err != nil {
+		return reviewRun{}, err
+	}
+	r := reviewRun{dir: dir, root: root, num: num}
+	have, err := rundir.ReadJSON(dir, workerFile, &r.state)
+	if err != nil {
+		return reviewRun{}, err
+	}
+	if !have || r.state.Worker.Harness == "" {
+		return reviewRun{}, fmt.Errorf("%s has no %s: not a round-based run directory", dir, workerFile)
+	}
+	if _, err := rundir.Round(dir); err != nil {
+		return reviewRun{}, err
+	}
+	return r, nil
+}
+
+func (r reviewRun) label(k int) review.Label {
+	return review.Label{Harness: r.state.Worker.Harness, Num: r.num, Round: k}
+}
+
+// ReviewRun implements `agk review run <dir>`: the process inside the
+// companion. It runs the recorded round, then waits in its mailbox for
+// `agk review send` to request the next one; outside agterm it runs one round.
+func (e *Env) ReviewRun(ctx context.Context, args []string) int {
+	rep := reporter{env: e, target: e.session()}
+	setupFailed := func(err error) int {
+		rep.set(ctx, "blocked", review.FailureLine(review.Label{}, review.ReasonSetupFailed))
+		return e.errorf("%s: %v", review.ReasonSetupFailed, err)
+	}
+	if len(args) != 1 {
+		return setupFailed(errors.New("usage: agk review run <run-dir>"))
+	}
+	run, err := loadReviewRun(args[0])
+	if err != nil {
+		return setupFailed(err)
+	}
+	if rep.target != "" {
+		if pane := e.Getenv("AGTERM_PANE_ID"); pane != "" {
+			if err := fsx.ReplaceFile(filepath.Join(run.dir, paneFile), []byte(pane+"\n"), 0o644); err != nil {
+				return setupFailed(err)
+			}
+		}
+	}
+	k, _ := rundir.Round(run.dir)
+	for {
+		code := e.runRound(ctx, run.dir, k, e.Stdout, rep)
+		if rep.target == "" || ctx.Err() != nil {
+			return code
+		}
+		next, err := e.nextRound(ctx, run.dir, k)
+		if err != nil {
+			if ctx.Err() != nil {
+				return code
+			}
+			return e.errorf("wait for the next round: %v", err)
+		}
+		k = next
+	}
+}
+
+// nextRound blocks in the companion's mailbox until the run's round file
+// moves past k.
+func (e *Env) nextRound(ctx context.Context, dir string, k int) (int, error) {
+	for {
+		_, err := e.Ctl.MsgRead(ctx, 0)
+		if err != nil && !errors.Is(err, agterm.ErrTimeout) {
+			return 0, err
+		}
+		if cur, err := rundir.Round(dir); err == nil && cur > k {
+			return cur, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
+}
+
+// runRound runs round k of the review in dir and records its outcome.
+func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, rep reporter) int {
+	run, err := loadReviewRun(dir)
+	if err != nil {
+		rep.set(ctx, "blocked", review.FailureLine(review.Label{}, review.ReasonSetupFailed))
+		return e.errorf("%s: %v", review.ReasonSetupFailed, err)
+	}
+	rd := rundir.RoundDir(run.dir, k)
+	l := run.label(k)
+	fail := func(reason string, err error) int {
+		if werr := writeResult(rd, runResult{Status: "blocked", Round: k, Reason: reason}); werr != nil {
+			fmt.Fprintf(e.Stderr, "agk: warning: %v\n", werr)
+		}
+		rep.set(ctx, "blocked", review.FailureLine(l, reason))
+		return e.errorf("%s: %v", reason, err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(rd, "prompt.md"))
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	if num, err = rundir.Number(dir); err != nil {
-		return fail(review.ReasonSetupFailed, err)
-	}
-	recordable = true // dir is a verified run dir from here on
-	prompt, err := os.ReadFile(filepath.Join(dir, "prompt.md"))
+	driver, err := e.Driver(run.state.Worker.Harness)
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	stamped := harness.NewStampWriter(term, e.Now)
-	fmt.Fprintf(stamped, "agk: review #%d started, run dir %s\n", num, dir)
-	rep.set(ctx, "active", review.ReviewingLine(num))
-	if err := e.Runner.Run(ctx, root, dir, string(prompt), term); err != nil {
-		return fail(review.ReasonCodexFailed, err)
+	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d started, run dir %s\n", run.num, k, run.dir)
+	rep.set(ctx, "active", review.ReviewingLine(l))
+	turn := harness.Turn{Worker: run.state.Worker, Root: run.root, Dir: rd, Log: reviewLog, Prompt: string(prompt),
+		Session: run.state.Session, Resume: run.state.Session != ""}
+	session, rerr := driver.Review(ctx, turn, term)
+	if session != "" && session != run.state.Session {
+		run.state.Session = session
+		if err := rundir.WriteJSON(run.dir, workerFile, run.state); err != nil {
+			fmt.Fprintf(e.Stderr, "agk: warning: record reviewer session: %v\n", err)
+		}
 	}
-	raw, err := os.ReadFile(e.Runner.OutputPath(dir))
+	if rerr != nil {
+		return fail(review.ReasonFailed(run.state.Worker.Harness), rerr)
+	}
+	raw, err := os.ReadFile(filepath.Join(rd, harness.OutputFile))
 	if err != nil {
 		return fail(review.ReasonInvalidOutput, err)
 	}
@@ -140,35 +245,22 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	if err := fsx.ReplaceFile(filepath.Join(dir, "review.json"), append(b, '\n'), 0o644); err != nil {
+	if err := fsx.ReplaceFile(filepath.Join(rd, "review.json"), append(b, '\n'), 0o644); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	if err := writeResult(dir, runResult{Status: "completed", Findings: len(r.Findings), Verdict: r.Verdict}); err != nil {
+	if err := writeResult(rd, runResult{Status: "completed", Round: k, Findings: len(r.Findings), Verdict: r.Verdict}); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	rep.set(ctx, "completed", review.SummaryLine(num, r))
-	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d: %d finding(s), verdict %s -> %s\n",
-		num, len(r.Findings), r.Verdict, filepath.Join(dir, "review.json"))
+	rep.set(ctx, "completed", review.SummaryLine(l, r))
+	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d: %d finding(s), verdict %s -> %s\n",
+		run.num, k, len(r.Findings), r.Verdict, filepath.Join(rd, "review.json"))
 	return ExitOK
 }
 
-// runRoot maps <root>/.agk/reviews/<ts> to <root>.
-func runRoot(dir string) (string, error) {
-	reviews := filepath.Dir(dir)
-	agk := filepath.Dir(reviews)
-	if filepath.Base(reviews) != "reviews" || filepath.Base(agk) != ".agk" {
-		return "", errors.New(dir + " is not a .agk/reviews/<run> directory")
-	}
-	return filepath.Dir(agk), nil
-}
+// forwardedEnv lists the caller variables a companion command carries.
+var forwardedEnv = []string{"PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "AGTERMCTL"}
 
-// forwardedEnv lists the caller variables the companion command carries.
-var forwardedEnv = []string{"PATH", "CODEX_HOME", "AGTERMCTL"}
-
-// CompanionName is the sidebar name of the review companion, suffixed " #N".
-const CompanionName = "codex-review"
-
-// CompanionFile is the run-dir file holding the review companion's session id.
+// CompanionFile is the run-dir file holding a worker companion's session id.
 const CompanionFile = "companion"
 
 type startResult struct {
@@ -176,11 +268,58 @@ type startResult struct {
 	Dir       string  `json:"dir"`
 }
 
-// ReviewStart implements `agk review start [--base REF]`.
+// companionCommand builds `[env K=V…] '<agk>' <sub> '<path>'` for a companion,
+// forwarding PATH (so harnesses and agtermctl resolve even without a login
+// shell), CODEX_HOME, CLAUDE_CONFIG_DIR and AGTERMCTL. Never secrets: the
+// command line is visible in ps. sub is plain words.
+func (e *Env) companionCommand(sub, path string) (string, error) {
+	exe, err := e.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate agk binary: %v", err)
+	}
+	prefix, err := e.envCommand(exe)
+	if err != nil {
+		return "", err
+	}
+	qp, err := shellQuote(path)
+	if err != nil {
+		return "", err
+	}
+	return prefix + " " + sub + " " + qp, nil
+}
+
+// envCommand quotes argv for the login shell, prefixed with the forwarded
+// environment.
+func (e *Env) envCommand(argv ...string) (string, error) {
+	var parts []string
+	for _, k := range forwardedEnv {
+		if v := e.Getenv(k); v != "" {
+			q, err := shellQuote(k + "=" + v)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, q)
+		}
+	}
+	if len(parts) > 0 {
+		parts = append([]string{"env"}, parts...)
+	}
+	for _, a := range argv {
+		q, err := shellQuote(a)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, q)
+	}
+	return strings.Join(parts, " "), nil
+}
+
+// ReviewStart implements `agk review start [--base REF] [--reviewer H[:M]]`.
 func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("agk review start", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	base := fs.String("base", "main", "review changes since the merge base of this ref and HEAD")
+	reviewer := fs.String("reviewer", "", "reviewer HARNESS[:MODEL] for this run")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK
@@ -194,39 +333,20 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	cfg, err := e.resolveConfig(scope.Root, config.Flags{Reviewer: *reviewer})
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	e.warnSame(cfg)
 	prompt, err := review.Prompt(scope)
 	if err != nil {
 		return e.errorf("render prompt: %v", err)
 	}
 	parent := e.session()
-	var cmdExe string
 	if parent != "" {
 		// Refuse unquotable paths before leaving a run dir behind. The run dir
 		// lives under the root, so checking the root covers it.
-		exe, err := e.Executable()
-		if err != nil {
-			return e.errorf("locate agk binary: %v", err)
-		}
-		if cmdExe, err = shellQuote(exe); err != nil {
-			return e.errorf("%v", err)
-		}
-		// Forward the caller's PATH (so codex and agtermctl resolve even when
-		// agterm runs the command without a login shell), CODEX_HOME (codex
-		// config and auth) and AGTERMCTL (the same agtermctl as the caller). Never secrets: the command line is visible in ps.
-		var envArgs []string
-		for _, k := range forwardedEnv {
-			if v := e.Getenv(k); v != "" {
-				q, err := shellQuote(k + "=" + v)
-				if err != nil {
-					return e.errorf("%v", err)
-				}
-				envArgs = append(envArgs, q)
-			}
-		}
-		if len(envArgs) > 0 {
-			cmdExe = "env " + strings.Join(envArgs, " ") + " " + cmdExe
-		}
-		if _, err := shellQuote(scope.Root); err != nil {
+		if _, err := e.companionCommand("review run", scope.Root); err != nil {
 			return e.errorf("%v", err)
 		}
 	}
@@ -234,19 +354,22 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("create run dir: %v", err)
 	}
-	if err := fsx.ReplaceFile(filepath.Join(dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
-		return e.errorf("write prompt: %v", err)
+	if err := initRound(dir, 1, prompt); err != nil {
+		return e.errorf("%v", err)
+	}
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: cfg.Reviewer, Base: *base}); err != nil {
+		return e.errorf("record reviewer: %v", err)
 	}
 	if parent == "" {
-		// Outside agterm: review in the foreground. Codex output goes to stderr
-		// so stdout carries only the result object.
-		code := e.runReview(ctx, dir, e.Stderr, reporter{env: e})
+		// Outside agterm: review in the foreground. Reviewer output goes to
+		// stderr so stdout carries only the result object.
+		code := e.runRound(ctx, dir, 1, e.Stderr, reporter{env: e})
 		if c := e.printJSON(startResult{Dir: dir}); c != ExitOK {
 			return c
 		}
 		return code
 	}
-	cmdDir, err := shellQuote(dir)
+	cmd, err := e.companionCommand("review run", dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -254,22 +377,172 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	name := fmt.Sprintf("%s #%d", CompanionName, num)
-	id, err := e.Ctl.NewCompanion(ctx, parent, name, cmdExe+" review run "+cmdDir, scope.Root)
+	name := fmt.Sprintf("%s-review #%d", cfg.Reviewer.Harness, num)
+	id, err := e.startCompanion(ctx, parent, name, cmd, scope.Root, dir)
 	if err != nil {
-		return e.errorf("start companion: %v", err)
+		return e.errorf("%v", err)
 	}
-	// `agk review wait` finds the companion through this file; a review it
-	// cannot find would never be closed, so do not leave one running.
+	return e.printJSON(startResult{Companion: &id, Dir: dir})
+}
+
+// initRound creates rounds/<k>/prompt.md and records k as the current round.
+func initRound(dir string, k int, prompt string) error {
+	rd, err := rundir.MakeRound(dir, k)
+	if err != nil {
+		return fmt.Errorf("create round dir: %v", err)
+	}
+	if err := fsx.ReplaceFile(filepath.Join(rd, "prompt.md"), []byte(prompt), 0o644); err != nil {
+		return fmt.Errorf("write prompt: %v", err)
+	}
+	if err := rundir.SetRound(dir, k); err != nil {
+		return fmt.Errorf("record round: %v", err)
+	}
+	return nil
+}
+
+// startCompanion creates a worker companion and records its id in dir. A
+// companion whose id cannot be recorded would never be found again, so it is
+// closed.
+func (e *Env) startCompanion(ctx context.Context, parent, name, cmd, cwd, dir string) (string, error) {
+	id, err := e.Ctl.NewCompanion(ctx, parent, name, cmd, cwd)
+	if err != nil {
+		return "", fmt.Errorf("start companion: %v", err)
+	}
 	if err := fsx.ReplaceFile(filepath.Join(dir, CompanionFile), []byte(id+"\n"), 0o644); err != nil {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
 		defer cancel()
 		if cerr := e.Ctl.Close(cctx, id); cerr != nil {
 			fmt.Fprintf(e.Stderr, "agk: warning: close companion %s: %v\n", id, cerr)
 		}
-		return e.errorf("record companion id: %v", err)
+		return "", fmt.Errorf("record companion id: %v", err)
 	}
-	return e.printJSON(startResult{Companion: &id, Dir: dir})
+	return id, nil
+}
+
+type sendResult struct {
+	Companion *string `json:"companion"`
+	Dir       string  `json:"dir"`
+	Round     int     `json:"round"`
+}
+
+// sendHandshake bounds how long `review send` waits for the reviewer to pick
+// up the round, so a following `review wait` does not see the last round's
+// stale completed status.
+const sendHandshake = 30 * time.Second
+
+// ReviewSend implements `agk review send <run-dir> [--note FILE]`.
+func (e *Env) ReviewSend(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("agk review send", flag.ContinueOnError)
+	fs.SetOutput(e.Stderr)
+	notePath := fs.String("note", "", "file with a note for the reviewer (what was fixed)")
+	pos, code, ok := parseInterleaved(fs, args)
+	if !ok {
+		return code
+	}
+	if len(pos) != 1 {
+		return e.errorf("usage: agk review send <run-dir> [--note FILE]")
+	}
+	run, err := loadReviewRun(pos[0])
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	note := ""
+	if *notePath != "" {
+		b, err := os.ReadFile(*notePath)
+		if err != nil {
+			return e.errorf("read note: %v", err)
+		}
+		note = string(b)
+	}
+	k, _ := rundir.Round(run.dir)
+	var last runResult
+	have, err := rundir.ReadJSON(rundir.RoundDir(run.dir, k), "result.json", &last)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	if !have {
+		return e.errorf("round %d of %s is still running; wait for it first", k, run.dir)
+	}
+	companion, err := readCompanion(run.dir)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	pane := ""
+	if companion != "" {
+		b, err := os.ReadFile(filepath.Join(run.dir, paneFile))
+		if err != nil {
+			return e.errorf("reviewer pane unknown (%v); start a new review", err)
+		}
+		pane = strings.TrimSpace(string(b))
+		if !companionID.MatchString(pane) {
+			return e.errorf("%s: not a pane id: %q", filepath.Join(run.dir, paneFile), pane)
+		}
+	}
+	scope, err := e.Collect(ctx, run.root, run.state.Base)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	var prompt string
+	if run.state.Session != "" {
+		prompt, err = review.RereviewPrompt(scope, k+1, note)
+	} else {
+		prompt, err = review.Prompt(scope) // nothing to resume: start over
+	}
+	if err != nil {
+		return e.errorf("render prompt: %v", err)
+	}
+	if err := initRound(run.dir, k+1, prompt); err != nil {
+		return e.errorf("%v", err)
+	}
+	if companion == "" {
+		code := e.runRound(ctx, run.dir, k+1, e.Stderr, reporter{env: e})
+		if c := e.printJSON(sendResult{Dir: run.dir, Round: k + 1}); c != ExitOK {
+			return c
+		}
+		return code
+	}
+	if err := e.Ctl.MsgSend(ctx, companion+":"+pane, fmt.Sprintf("round %d", k+1)); err != nil {
+		// The reviewer never heard of the round: take it back.
+		if rerr := rundir.SetRound(run.dir, k); rerr != nil {
+			fmt.Fprintf(e.Stderr, "agk: warning: %v\n", rerr)
+		}
+		os.RemoveAll(rundir.RoundDir(run.dir, k+1))
+		if errors.Is(err, agterm.ErrGone) {
+			return e.errorf("the reviewer is gone (%v); start a new review", err)
+		}
+		return e.errorf("%v", err)
+	}
+	if _, err := e.Ctl.Wait(ctx, companion, []string{"active"}, sendHandshake); err != nil {
+		fmt.Fprintf(e.Stderr, "agk: warning: reviewer %s did not report round %d as started: %v\n", companion, k+1, err)
+	}
+	return e.printJSON(sendResult{Companion: &companion, Dir: run.dir, Round: k + 1})
+}
+
+// ReviewClose implements `agk review close <run-dir>`.
+func (e *Env) ReviewClose(ctx context.Context, args []string) int {
+	if len(args) != 1 {
+		return e.errorf("usage: agk review close <run-dir>")
+	}
+	run, err := loadReviewRun(args[0])
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	return e.closeCompanion(ctx, run.dir)
+}
+
+// closeCompanion closes the companion recorded in dir, if any and still open.
+func (e *Env) closeCompanion(ctx context.Context, dir string) int {
+	companion, err := readCompanion(dir)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	if companion == "" {
+		return ExitOK
+	}
+	if err := e.Ctl.Close(ctx, companion); err != nil && !errors.Is(err, agterm.ErrGone) {
+		return e.errorf("close companion %s: %v", companion, err)
+	}
+	return ExitOK
 }
 
 // shellQuote single-quotes s for the user's login shell (sh-family or fish).

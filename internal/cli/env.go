@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
+	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/setup"
 )
@@ -27,7 +28,7 @@ type Env struct {
 	Stdout, Stderr io.Writer
 	Getenv         func(string) string
 	Ctl            agterm.Ctl
-	Runner         review.Runner
+	Driver         func(name string) (harness.Driver, error)
 	Collect        func(ctx context.Context, dir, base string) (review.Scope, error)
 	RepoRoot       func(ctx context.Context, dir string) (string, error)
 	Now            func() time.Time
@@ -56,7 +57,9 @@ func NewEnv() (*Env, error) {
 		Stderr:     os.Stderr,
 		Getenv:     os.Getenv,
 		Ctl:        agterm.NewCLI(),
-		Runner:     review.NewCodex(),
+		Driver: func(name string) (harness.Driver, error) {
+			return harness.New(name, harness.DefaultRuntime())
+		},
 		Collect:    review.Collect,
 		RepoRoot:   review.RepoRoot,
 		Now:        time.Now,

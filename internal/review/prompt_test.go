@@ -103,3 +103,26 @@ func TestPromptCapAppliesAfterEscaping(t *testing.T) {
 		t.Fatal("escaped diff over the cap must be truncated with the read-the-rest note")
 	}
 }
+
+func TestPromptIsHarnessNeutral(t *testing.T) {
+	p, _ := Prompt(sampleScope())
+	if strings.Contains(p, "You are Codex") {
+		t.Fatal("prompt must not assume codex")
+	}
+}
+
+func TestRereviewPrompt(t *testing.T) {
+	p, err := RereviewPrompt(sampleScope(), 3, "Fixed the nil check in x.go.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"round 3", "earlier findings", "regression", "Fixed the nil check in x.go.", "+func Changed() {}", "JSON"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("re-review prompt lacks %q", want)
+		}
+	}
+	p, _ = RereviewPrompt(sampleScope(), 2, "")
+	if strings.Contains(p, "<note_from_author>") {
+		t.Error("no note block without a note")
+	}
+}

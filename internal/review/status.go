@@ -5,30 +5,48 @@ import (
 	"strings"
 )
 
-// label is the info-line prefix: "codex #N", or "codex" when N is unknown (0).
-func label(n int) string {
-	if n > 0 {
-		return fmt.Sprintf("codex #%d", n)
-	}
-	return "codex"
+// Label identifies a review round in info lines: "codex #4 r2".
+type Label struct {
+	Harness    string
+	Num, Round int // 0 when unknown
 }
 
-// ReviewingLine is the info line while review n runs.
-func ReviewingLine(n int) string { return label(n) + ": reviewing" }
+// String is the info-line prefix; unknown parts are left out, and an unknown
+// harness reads "review".
+func (l Label) String() string {
+	s := l.Harness
+	if s == "" {
+		s = "review"
+	}
+	if l.Num > 0 {
+		s += fmt.Sprintf(" #%d", l.Num)
+		if l.Round > 0 {
+			s += fmt.Sprintf(" r%d", l.Round)
+		}
+	}
+	return s
+}
+
+func label(l Label) string { return l.String() }
+
+// ReviewingLine is the info line while a round runs.
+func ReviewingLine(l Label) string { return label(l) + ": reviewing" }
 
 // Failure reasons shown in the info line. Fixed strings keep reviewer output
 // out of the sidebar markdown; details go to the terminal and codex.log.
 const (
-	ReasonCodexFailed   = "codex failed"
 	ReasonInvalidOutput = "invalid review output"
 	ReasonSetupFailed   = "setup failed"
 )
 
-// FailureLine is the info line for failed review n.
-func FailureLine(n int, reason string) string { return label(n) + ": " + reason }
+// ReasonFailed is the reason for a reviewer process that failed.
+func ReasonFailed(harness string) string { return harness + " failed" }
 
-// SummaryLine is the info line for finished review num, as agterm inline markdown.
-func SummaryLine(num int, r Review) string {
+// FailureLine is the info line for a failed round.
+func FailureLine(l Label, reason string) string { return label(l) + ": " + reason }
+
+// SummaryLine is the info line for a finished round, as agterm inline markdown.
+func SummaryLine(num Label, r Review) string {
 	n := len(r.Findings)
 	if n == 0 {
 		if r.Verdict == "approve" {

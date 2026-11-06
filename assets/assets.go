@@ -19,3 +19,9 @@ var ReviewPrompt string
 //
 //go:embed reviewer-tools.txt
 var ReviewerTools string
+
+// RereviewPrompt is the text/template wrapped around the review prompt for
+// a later round that resumes the reviewer's session.
+//
+//go:embed rereview-prompt.md
+var RereviewPrompt string

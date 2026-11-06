@@ -11,33 +11,71 @@ import (
 	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
+	"github.com/shurastik/agterm-kit/internal/config"
+	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
+	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
-// fakeRunner writes a scripted codex output file.
-type fakeRunner struct {
-	output string // written to OutputPath when non-empty
-	err    error
-	calls  []string // root, dir, prompt
+// fakeDriver scripts harness turns.
+type fakeDriver struct {
+	name     string
+	outputs  []string // Review: written to OutputFile per call; "" writes nothing
+	errs     []error  // per call
+	sessions []string // session returned per call; default: the turn's, else "SESS-<name>"
+	turns    []harness.Turn
+	files    []harness.ApplierFiles
+	headless []harness.Turn
+	// onHeadless runs inside Headless (e.g. to write the round report).
+	onHeadless func(t harness.Turn)
 }
 
-func (f *fakeRunner) OutputPath(dir string) string { return filepath.Join(dir, "codex-output.json") }
+func (f *fakeDriver) Name() string { return f.name }
 
-func (f *fakeRunner) Run(_ context.Context, root, dir, prompt string, term io.Writer) error {
-	f.calls = append(f.calls, root, dir, prompt)
-	io.WriteString(term, "codex streaming\n")
-	if f.output != "" {
-		if err := os.WriteFile(f.OutputPath(dir), []byte(f.output), 0o644); err != nil {
-			return err
+func (f *fakeDriver) Interactive(w config.Worker, root string, files harness.ApplierFiles, session, kickoff string) []string {
+	return []string{f.name, "--model=" + w.Model, "--session=" + session, kickoff}
+}
+
+func (f *fakeDriver) pick(i int, t harness.Turn) (string, error) {
+	var err error
+	if i < len(f.errs) {
+		err = f.errs[i]
+	}
+	sess := t.Session
+	if i < len(f.sessions) {
+		sess = f.sessions[i]
+	} else if sess == "" {
+		sess = "SESS-" + f.name
+	}
+	return sess, err
+}
+
+func (f *fakeDriver) Headless(_ context.Context, t harness.Turn, files harness.ApplierFiles, term io.Writer) (string, error) {
+	f.headless = append(f.headless, t)
+	f.files = append(f.files, files)
+	io.WriteString(term, f.name+" applying\n")
+	if f.onHeadless != nil {
+		f.onHeadless(t)
+	}
+	return f.pick(len(f.headless)-1, t)
+}
+
+func (f *fakeDriver) Review(_ context.Context, t harness.Turn, term io.Writer) (string, error) {
+	f.turns = append(f.turns, t)
+	i := len(f.turns) - 1
+	io.WriteString(term, f.name+" streaming\n")
+	if i < len(f.outputs) && f.outputs[i] != "" {
+		if err := os.WriteFile(filepath.Join(t.Dir, harness.OutputFile), []byte(f.outputs[i]), 0o644); err != nil {
+			return "", err
 		}
 	}
-	return f.err
+	return f.pick(i, t)
 }
 
 type tenv struct {
 	env      *Env
 	ctl      *agtermtest.Fake
-	runner   *fakeRunner
+	drivers  map[string]*fakeDriver
 	out, err *bytes.Buffer
 	vars     map[string]string
 }
@@ -49,7 +87,7 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 	t.Cleanup(func() { statusRetryDelay = old })
 	h := &tenv{
 		ctl:    &agtermtest.Fake{CompanionID: "COMP-1"},
-		runner: &fakeRunner{},
+		drivers: map[string]*fakeDriver{"codex": {name: "codex"}, "claude": {name: "claude"}},
 		out:    &bytes.Buffer{},
 		err:    &bytes.Buffer{},
 		vars:   map[string]string{},
@@ -63,7 +101,12 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 		Stderr:     h.err,
 		Getenv:     func(k string) string { return h.vars[k] },
 		Ctl:        h.ctl,
-		Runner:     h.runner,
+		Driver: func(name string) (harness.Driver, error) {
+			if d, ok := h.drivers[name]; ok {
+				return d, nil
+			}
+			return nil, errors.New("no driver " + name)
+		},
 		Now:        func() time.Time { return time.Date(2026, 11, 5, 10, 0, 0, 0, time.Local) },
 		Executable: func() (string, error) { return "/usr/local/bin/agk", nil },
 		Cwd:        t.TempDir(),
@@ -78,15 +121,28 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 	return h
 }
 
-// runDir makes <root>/.agk/reviews/<ts>/prompt.md and returns root and dir.
+// runDir makes a codex review run <root>/.agk/reviews/<ts>/ at round 1 with
+// rounds/1/prompt.md and returns root and dir.
 func runDir(t *testing.T) (string, string) {
+	t.Helper()
+	return runDirWith(t, config.Worker{Harness: config.Codex}, "")
+}
+
+func runDirWith(t *testing.T, w config.Worker, session string) (string, string) {
 	t.Helper()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	rd := filepath.Join(dir, "rounds", "1")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("THE PROMPT"), 0o644); err != nil {
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: w, Base: "main", Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rundir.SetRound(dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "prompt.md"), []byte("THE PROMPT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root, dir

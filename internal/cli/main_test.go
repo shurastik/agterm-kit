@@ -30,13 +30,13 @@ func TestMainUnknown(t *testing.T) {
 }
 
 func TestMainRoutesReviewRun(t *testing.T) {
-	h := newHarness(t, true)
+	h := newHarness(t, false)
 	_, dir := runDir(t)
-	h.runner.output = threeFindings
+	h.drivers["codex"].outputs = []string{threeFindings}
 	if code := h.env.Main(context.Background(), []string{"review", "run", dir}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if len(h.runner.calls) == 0 {
+	if len(h.drivers["codex"].turns) == 0 {
 		t.Fatal("review run not routed")
 	}
 }

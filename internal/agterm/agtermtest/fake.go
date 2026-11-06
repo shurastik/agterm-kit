@@ -3,6 +3,7 @@ package agtermtest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -44,7 +45,8 @@ type Fake struct {
 	WaitSeq []WaitResult
 	// OnType, when set, runs before Type returns.
 	OnType func(target, text string)
-	// OnMsgRead, when set, answers MsgRead; otherwise it returns ErrTimeout.
+	// OnMsgRead, when set, answers MsgRead; otherwise it returns ErrNoMessage
+	// so a loop that waits for messages ends instead of spinning.
 	OnMsgRead func() ([]agterm.Message, error)
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
@@ -152,8 +154,11 @@ func (f *Fake) MsgRead(ctx context.Context, timeout time.Duration) ([]agterm.Mes
 	if f.OnMsgRead != nil {
 		return f.OnMsgRead()
 	}
-	return nil, agterm.ErrTimeout
+	return nil, ErrNoMessage
 }
+
+// ErrNoMessage is MsgRead's answer when no messages were scripted.
+var ErrNoMessage = errors.New("agtermtest: no message scripted")
 
 func (f *Fake) Close(ctx context.Context, target string) error {
 	f.record(ctx, "Close", target)

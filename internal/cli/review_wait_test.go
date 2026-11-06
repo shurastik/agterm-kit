@@ -11,11 +11,12 @@ import (
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
+	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
 const (
-	completedResult = `{"status":"completed","findings":3,"verdict":"needs-attention"}`
-	blockedResult   = `{"status":"blocked","reason":"codex failed","findings":0}`
+	completedResult = `{"status":"completed","round":1,"findings":3,"verdict":"needs-attention"}`
+	blockedResult   = `{"status":"blocked","round":1,"reason":"codex failed","findings":0}`
 )
 
 // waitDir makes a run dir with an optional companion file and result.json.
@@ -35,7 +36,7 @@ func waitDir(t *testing.T, companion, result string) string {
 
 func writeResultFile(t *testing.T, dir, result string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "result.json"), []byte(result+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rundir.RoundDir(dir, 1), "result.json"), []byte(result+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -55,8 +56,7 @@ func assertCalls(t *testing.T, f *agtermtest.Fake, want ...agtermtest.Call) {
 }
 
 var (
-	waitCall  = agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "30m0s"}}
-	closeCall = agtermtest.Call{Method: "Close", Args: []string{"C-1"}}
+	waitCall = agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "30m0s"}}
 )
 
 func TestReviewWaitCompleted(t *testing.T) {
@@ -71,7 +71,7 @@ func TestReviewWaitCompleted(t *testing.T) {
 	if h.out.String() != completedResult+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, waitCall, closeCall)
+	assertCalls(t, h.ctl, waitCall) // the reviewer stays for the next round
 	if h.err.Len() != 0 {
 		t.Fatalf("stderr = %q", h.err)
 	}
@@ -98,7 +98,7 @@ func TestReviewWaitBlockedWithoutResult(t *testing.T) {
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != `{"status":"blocked"}`+"\n" {
+	if h.out.String() != `{"status":"blocked","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	assertCalls(t, h.ctl, waitCall)
@@ -124,7 +124,7 @@ func TestReviewWaitCancelled(t *testing.T) {
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != `{"status":"cancelled"}`+"\n" {
+	if h.out.String() != `{"status":"cancelled","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	assertCalls(t, h.ctl, waitCall)
@@ -137,7 +137,7 @@ func TestReviewWaitRunning(t *testing.T) {
 	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != `{"status":"running"}`+"\n" {
+	if h.out.String() != `{"status":"running","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "1m0s"}})
@@ -154,7 +154,7 @@ func TestReviewWaitTimeoutButCompleted(t *testing.T) {
 	if h.out.String() != completedResult+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Wait", "Close"}) {
+	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Wait"}) {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
 }
@@ -183,7 +183,7 @@ func TestReviewWaitResultAlreadyThere(t *testing.T) {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	// No wait: a completed status agterm already reset would block it.
-	assertCalls(t, h.ctl, closeCall)
+	assertCalls(t, h.ctl)
 }
 
 func TestReviewWaitBlockedResultAlreadyThere(t *testing.T) {
@@ -204,21 +204,6 @@ func TestReviewWaitUserClosedFinishedCompanion(t *testing.T) {
 	}
 	if h.out.String() != completedResult+"\n" || h.err.Len() != 0 {
 		t.Fatalf("stdout %q stderr %q", h.out, h.err)
-	}
-}
-
-func TestReviewWaitCloseFailureIsAWarning(t *testing.T) {
-	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", completedResult)
-	h.ctl.CloseErr = errors.New("socket refused")
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != completedResult+"\n" {
-		t.Fatalf("stdout = %q", h.out)
-	}
-	if !strings.Contains(h.err.String(), "warning") || !strings.Contains(h.err.String(), "C-1") {
-		t.Fatalf("stderr = %q", h.err)
 	}
 }
 
@@ -276,6 +261,7 @@ func TestReviewWaitRejectsBadInput(t *testing.T) {
 		"flag companion":     {companion: "--undoable\n", args: func(d string) []string { return []string{d} }},
 		"bad result json":    {companion: "C-1\n", result: "nope", args: func(d string) []string { return []string{d} }},
 		"unknown status":     {companion: "C-1\n", result: `{"status":"done"}`, args: func(d string) []string { return []string{d} }},
+		"flat run dir":       {companion: "C-1\n", args: func(d string) []string { os.Remove(filepath.Join(d, rundir.RoundFile)); return []string{d} }},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

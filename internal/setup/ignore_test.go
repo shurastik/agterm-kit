@@ -57,7 +57,8 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 	home := realTemp(t)
 	p := filepath.Join(home, "ignore")
 	for _, content := range []string{
-		".agk\n", ".agk/\n", "/.agk\n", "/.agk/\n", "foo\n  .agk/  \nbar", "**/.claude/x\n.agk/",
+		".agk\n", ".agk/\n", "/.agk\n", "/.agk/\n", ".agk/  \n", ".agk/\r\n", "**/.claude/x\n.agk/",
+		".agk/\n!.agk/\n.agk/\n", // last matching rule wins
 	} {
 		os.WriteFile(p, []byte(content), 0o644)
 		acts, err := planIgnore(ignoreCfg(home, map[string]string{}, p))
@@ -65,7 +66,12 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 			t.Errorf("%q: %+v, %v; want ok", content, acts, err)
 		}
 	}
-	for _, content := range []string{"", "**/.claude/settings.local.json\n", ".agkx/\n", "# .agk/\n", "sub/.agk/\n"} {
+	for _, content := range []string{
+		"", "**/.claude/settings.local.json\n", ".agkx/\n", "# .agk/\n", "sub/.agk/\n",
+		"  .agk/\n",         // leading spaces are part of the pattern
+		".agk/\n!.agk/\n",   // re-included by a later rule
+		".agk/\n!/.agk\n",
+	} {
 		os.WriteFile(p, []byte(content), 0o644)
 		acts, _ := planIgnore(ignoreCfg(home, map[string]string{}, p))
 		if len(acts) != 1 || acts[0].Kind != KindAppend {

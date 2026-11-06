@@ -6,10 +6,11 @@ import (
 	"strings"
 )
 
-// GlobalGitConfig reads a global git config value with paths expanded. An unset
+// GlobalGitConfig reads a global git config value, following [include] files
+// (off by default with --global) and expanding paths. An unset
 // key, or no git at all, is "" (the dependency report flags a missing git).
 func GlobalGitConfig(key string) (string, error) {
-	out, err := exec.Command("git", "config", "--global", "--path", "--get", key).Output()
+	out, err := exec.Command("git", "config", "--global", "--includes", "--path", "--get", key).Output()
 	var exit *exec.ExitError
 	switch {
 	case errors.Is(err, exec.ErrNotFound):

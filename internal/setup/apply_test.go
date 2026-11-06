@@ -2,6 +2,7 @@ package setup
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -104,5 +105,27 @@ func TestApplyLeavesConflictsAndContinues(t *testing.T) {
 	}
 	if _, err := os.Readlink(filepath.Join(e.home, ".codex", "skills", "agk-review")); err != nil {
 		t.Fatalf("other link not created: %v", err)
+	}
+}
+
+// TestApplyIgnoreHonouredByGit checks the result with git itself: whatever the
+// excludes file held before, .agk/ is ignored after setup.
+func TestApplyIgnoreHonouredByGit(t *testing.T) {
+	for _, before := range []string{"", "  .agk/\n", ".agk/\n!.agk/\n", "**/.claude/settings.local.json"} {
+		e := newLinkEnv(t)
+		excludes := filepath.Join(e.home, "gitignore")
+		os.WriteFile(excludes, []byte(before), 0o644)
+		c := fullCfg(e)
+		c.GitConfig = func(string) (string, error) { return excludes, nil }
+		applyPlan(t, c)
+		repo := mkdir(t, e.home, "repo")
+		if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v %s", err, out)
+		}
+		cmd := exec.Command("git", "-C", repo, "-c", "core.excludesFile="+excludes, "check-ignore", "-q", ".agk/reviews/x")
+		if err := cmd.Run(); err != nil {
+			data, _ := os.ReadFile(excludes)
+			t.Errorf("before %q: .agk/ not ignored by git (%v); file now %q", before, err, data)
+		}
 	}
 }

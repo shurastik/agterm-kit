@@ -44,13 +44,20 @@ func planIgnore(c Config) ([]Action, error) {
 	return []Action{{Kind: KindAppend, Path: p, Detail: IgnoreLine}}, nil
 }
 
+// ignoresAgk reports whether the rules leave .agk/ ignored. Only trailing
+// whitespace is insignificant in gitignore, and the last matching rule wins,
+// so a later "!.agk/" re-includes it. Other patterns that might match .agk
+// (globs) are not evaluated; missing one only adds a redundant line.
 func ignoresAgk(data []byte) bool {
+	ignored := false
 	s := bufio.NewScanner(bytes.NewReader(data))
 	for s.Scan() {
-		switch strings.TrimSpace(s.Text()) {
+		line := strings.TrimRight(s.Text(), " \t\r")
+		negated := strings.HasPrefix(line, "!")
+		switch strings.TrimPrefix(line, "!") {
 		case ".agk", ".agk/", "/.agk", "/.agk/":
-			return true
+			ignored = !negated
 		}
 	}
-	return false
+	return ignored
 }

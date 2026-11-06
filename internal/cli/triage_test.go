@@ -150,3 +150,32 @@ func TestTriageOutsideAgterm(t *testing.T) {
 		t.Fatalf("table:\n%s", h.out)
 	}
 }
+
+// Artifacts are replaced, never written through: a planted symlink must not
+// let triage overwrite the file it points at.
+func TestTriageDoesNotFollowSymlinks(t *testing.T) {
+	h := newHarness(t, true)
+	p := reviewFile(t, threeFindings)
+	dir := filepath.Dir(p)
+	victims := map[string]string{}
+	for _, name := range []string{"triage.html", "decisions.json"} {
+		victim := filepath.Join(t.TempDir(), name+".victim")
+		os.WriteFile(victim, []byte("precious"), 0o644)
+		if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+		victims[name] = victim
+	}
+	h.ctl.Outcome = agterm.Outcome{Value: allDecided}
+	if code := h.env.Triage(context.Background(), []string{p}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	for name, victim := range victims {
+		if b, _ := os.ReadFile(victim); string(b) != "precious" {
+			t.Errorf("%s: symlink target overwritten with %.40q", name, b)
+		}
+		if fi, err := os.Lstat(filepath.Join(dir, name)); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("%s: want a regular file replacing the link (%v)", name, err)
+		}
+	}
+}

@@ -14,15 +14,17 @@ type call struct {
 }
 
 type stubExec struct {
-	calls  []call
-	stdout string
-	stderr string
-	code   int
-	err    error
+	calls   []call
+	ctxErrs []error
+	stdout  string
+	stderr  string
+	code    int
+	err     error
 }
 
-func (s *stubExec) run(_ context.Context, name string, args []string) (Result, error) {
+func (s *stubExec) run(ctx context.Context, name string, args []string) (Result, error) {
 	s.calls = append(s.calls, call{name, append([]string(nil), args...)})
+	s.ctxErrs = append(s.ctxErrs, ctx.Err())
 	if s.err != nil {
 		return Result{}, s.err
 	}
@@ -193,5 +195,28 @@ func TestResolveBin(t *testing.T) {
 	}
 	if got := ResolveBin(env(nil), execOK()); got != "agtermctl" {
 		t.Errorf("path fallback: %q", got)
+	}
+}
+
+// Cancelling while the page is open must close that page: it belongs to the
+// agterm app and would otherwise outlive agk and block the next triage.
+func TestOverlayHTMLCancelClosesPage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &stubExec{code: -1}
+	c := &CLI{Bin: "agtermctl", Socket: "/s", Exec: s.run}
+	_, err := c.OverlayHTML(ctx, "S-1", "/f.html")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(s.calls) != 2 {
+		t.Fatalf("calls = %v", s.calls)
+	}
+	want := []string{"session", "overlay", "close", "--target", "S-1", "--socket", "/s"}
+	if !reflect.DeepEqual(s.calls[1].args, want) {
+		t.Fatalf("close args = %q", s.calls[1].args)
+	}
+	if s.ctxErrs[1] != nil {
+		t.Fatal("close must run on a context detached from the cancelled one")
 	}
 }

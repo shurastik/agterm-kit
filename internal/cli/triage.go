@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
+	"github.com/shurastik/agterm-kit/internal/fsx"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/triage"
 )
@@ -45,7 +46,7 @@ func (e *Env) Triage(ctx context.Context, args []string) int {
 	}
 	dir := filepath.Dir(path)
 	htmlPath := filepath.Join(dir, "triage.html")
-	if err := os.WriteFile(htmlPath, page, 0o644); err != nil {
+	if err := fsx.ReplaceFile(htmlPath, page, 0o644); err != nil {
 		return e.errorf("%v", err)
 	}
 	out, err := e.Ctl.OverlayHTML(ctx, session, htmlPath)
@@ -65,7 +66,7 @@ func (e *Env) Triage(ctx context.Context, args []string) int {
 		return e.errorf("%v", err)
 	}
 	b = append(b, '\n')
-	if err := os.WriteFile(filepath.Join(dir, "decisions.json"), b, 0o644); err != nil {
+	if err := fsx.ReplaceFile(filepath.Join(dir, "decisions.json"), b, 0o644); err != nil {
 		return e.errorf("%v", err)
 	}
 	e.Stdout.Write(b)

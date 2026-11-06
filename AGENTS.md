@@ -39,6 +39,7 @@ Reviewed repos should gitignore `.agk/`.
 | `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`) and a fake for tests |
 | `internal/review/` | Prompt from git diff, codex runner, review JSON parse/validate, run dir |
 | `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Runner, Collect, clock) |
+| `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
 | `internal/triage/` | HTML triage page (`html/template` + embedded CSS/JS) and outcome parsing |
 | `assets/` | Embedded files (review output schema, review prompt template) |
 | `skill/` | Claude skill telling the agent how to use `agk`; symlinked into `~/.claude/skills/` |

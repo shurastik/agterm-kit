@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shurastik/agterm-kit/internal/fsx"
 	"github.com/shurastik/agterm-kit/internal/review"
 )
 
@@ -90,7 +91,7 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "review.json"), append(b, '\n'), 0o644); err != nil {
+	if err := fsx.ReplaceFile(filepath.Join(dir, "review.json"), append(b, '\n'), 0o644); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
 	rep.set(ctx, "completed", review.SummaryLine(num, r))
@@ -178,7 +179,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("create run dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
+	if err := fsx.ReplaceFile(filepath.Join(dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return e.errorf("write prompt: %v", err)
 	}
 	if parent == "" {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Result is the captured outcome of one process run.
@@ -160,6 +161,14 @@ type Outcome struct {
 // (ErrDismissed). The page gets no file access.
 func (c *CLI) OverlayHTML(ctx context.Context, target, file string) (Outcome, error) {
 	res, err := c.run(ctx, "session", "overlay", "open", "--html", file, "--js", "--block", "--follow", "--target", target)
+	if ctx.Err() != nil {
+		// The page belongs to the agterm app and outlives the killed agtermctl;
+		// close it so a later submit is not lost and the next overlay can open.
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, _ = c.run(closeCtx, "session", "overlay", "close", "--target", target)
+		return Outcome{}, ctx.Err()
+	}
 	if err != nil {
 		return Outcome{}, err
 	}

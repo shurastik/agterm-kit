@@ -166,6 +166,9 @@ var forwardedEnv = []string{"PATH", "CODEX_HOME", "AGTERMCTL"}
 // CompanionName is the sidebar name of the review companion, suffixed " #N".
 const CompanionName = "codex-review"
 
+// CompanionFile is the run-dir file holding the review companion's session id.
+const CompanionFile = "companion"
+
 type startResult struct {
 	Companion *string `json:"companion"`
 	Dir       string  `json:"dir"`
@@ -253,6 +256,16 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	id, err := e.Ctl.NewCompanion(ctx, parent, name, cmdExe+" review run "+cmdDir, scope.Root)
 	if err != nil {
 		return e.errorf("start companion: %v", err)
+	}
+	// `agk review wait` finds the companion through this file; a review it
+	// cannot find would never be closed, so do not leave one running.
+	if err := fsx.ReplaceFile(filepath.Join(dir, CompanionFile), []byte(id+"\n"), 0o644); err != nil {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
+		defer cancel()
+		if cerr := e.Ctl.Close(cctx, id); cerr != nil {
+			fmt.Fprintf(e.Stderr, "agk: warning: close companion %s: %v\n", id, cerr)
+		}
+		return e.errorf("record companion id: %v", err)
 	}
 	return e.printJSON(startResult{Companion: &id, Dir: dir})
 }

@@ -7,7 +7,7 @@
 
 ## 2. review start records the companion
 
-- [ ] 2.1 Write `<run dir>/companion` after `NewCompanion` and before printing JSON; on write failure close the companion and exit 1 (design D2); verify with `review_start_test.go` cases: file holds the fake's id, inline run leaves no file, a failing write (run dir made read-only) closes the companion and exits 1 with empty stdout
+- [x] 2.1 Write `<run dir>/companion` after `NewCompanion` and before printing JSON; on write failure close the companion and exit 1 (design D2); verify with `review_start_test.go` cases: file holds the fake's id, inline run leaves no file, a failing write (run dir made read-only) closes the companion and exits 1 with empty stdout
 
 ## 3. review wait
 

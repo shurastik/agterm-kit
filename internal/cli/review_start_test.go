@@ -82,6 +82,27 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	if len(h.runner.calls) != 0 {
 		t.Fatal("start must not run codex itself inside agterm")
 	}
+	if id, err := os.ReadFile(filepath.Join(dir, "companion")); err != nil || string(id) != "COMP-1\n" {
+		t.Fatalf("companion file = %q, %v", id, err)
+	}
+}
+
+func TestReviewStartCompanionFileFailureClosesCompanion(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	h.ctl.OnNewCompanion = func() { os.Chmod(dir, 0o500) }
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	if code := h.env.ReviewStart(context.Background(), nil); code == 0 {
+		t.Fatal("want non-zero exit")
+	}
+	if h.out.Len() != 0 || !strings.Contains(h.err.String(), "companion") {
+		t.Fatalf("stdout %q stderr %q", h.out, h.err)
+	}
+	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"NewCompanion", "Close"}) || h.ctl.Calls[1].Args[0] != "COMP-1" {
+		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
 }
 
 func TestReviewStartDefaultBase(t *testing.T) {
@@ -165,6 +186,9 @@ func TestReviewStartOutsideAgtermRunsInline(t *testing.T) {
 	}
 	if !exists(filepath.Join(dir, "review.json")) {
 		t.Fatal("review.json missing")
+	}
+	if exists(filepath.Join(dir, "companion")) {
+		t.Fatal("inline run must not record a companion")
 	}
 }
 

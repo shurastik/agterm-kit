@@ -37,6 +37,8 @@ type Fake struct {
 	CloseErr     error
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
+	// OnNewCompanion, when set, runs before NewCompanion returns.
+	OnNewCompanion func()
 	// OnOverlay, when set, runs before OverlayHTML returns (e.g. to read the page file).
 	OnOverlay func(file string)
 }
@@ -63,6 +65,9 @@ func (f *Fake) Methods() []string {
 
 func (f *Fake) NewCompanion(ctx context.Context, parent, name, command, cwd string) (string, error) {
 	f.record(ctx, "NewCompanion", parent, name, command, cwd)
+	if f.OnNewCompanion != nil {
+		f.OnNewCompanion()
+	}
 	return f.CompanionID, f.CompanionErr
 }
 

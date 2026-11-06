@@ -32,14 +32,27 @@ check_tap() {
   git -C "$tap_dir" remote get-url origin >/dev/null 2>&1 || die "tap checkout has no origin remote"
   local dirty
   dirty="$(git -C "$tap_dir" status --porcelain)"
-  # A rerun after a failed tap commit finds its own formula left behind: drop it, it is rendered again.
-  if [[ -n "$dirty" && -n "$tag_exists" && "$dirty" == "$(git -C "$tap_dir" status --porcelain -- Formula/agk.rb)" ]]; then
+  # A rerun after a failed tap commit finds its own formula left behind. Drop it only when both the
+  # working copy and the index hold exactly what this script renders for this version (or HEAD's
+  # copy); anything else is a hand edit and stops the release.
+  if [[ -n "$dirty" && -n "$tag_exists" && "$dirty" == "$(git -C "$tap_dir" status --porcelain -- Formula/agk.rb)" ]] &&
+    own_formula <(cat "$tap_dir/Formula/agk.rb" 2>/dev/null) &&
+    own_formula <(git -C "$tap_dir" show :Formula/agk.rb 2>/dev/null); then
     echo "release: discarding the unfinished Formula/agk.rb of a previous run" >&2
     git -C "$tap_dir" reset --quiet -- Formula/agk.rb
     git -C "$tap_dir" checkout --quiet -- Formula/agk.rb 2>/dev/null || rm -f "$tap_dir/Formula/agk.rb"
     dirty="$(git -C "$tap_dir" status --porcelain)"
   fi
   [[ -z "$dirty" ]] || die "tap checkout has local changes"
+}
+
+# own_formula FILE: FILE is this version's render (any sha256) or the tap's committed formula.
+own_formula() {
+  local content
+  content="$(cat "$1")"
+  [[ "$content" == "$(git -C "$tap_dir" show HEAD:Formula/agk.rb 2>/dev/null)" ]] && return 0
+  [[ "$(sed -E 's/^  sha256 "[0-9a-f]{64}"$/  sha256 "{{SHA256}}"/' <<<"$content")" == \
+    "$(sed -e "s/{{VERSION}}/$version/g" "$template")" ]]
 }
 
 tag_exists=""

@@ -86,11 +86,9 @@ func removeLink(link string) error {
 // appendIgnore adds IgnoreLine to the excludes file, editing a symlinked
 // file at its target so a dotfiles link survives.
 func appendIgnore(path string) error {
-	target := path
-	if fi, err := os.Lstat(path); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
-		if target, err = filepath.EvalSymlinks(path); err != nil {
-			return err
-		}
+	target, err := followLinks(path)
+	if err != nil {
+		return err
 	}
 	data, err := os.ReadFile(target)
 	mode := fs.FileMode(0o644)
@@ -111,4 +109,35 @@ func appendIgnore(path string) error {
 	}
 	data = append(data, IgnoreLine+"\n"...)
 	return fsx.ReplaceFile(target, data, mode)
+}
+
+// followLinks resolves a chain of symlinks at path, allowing the final target
+// (and its directories) not to exist yet, unlike filepath.EvalSymlinks.
+func followLinks(path string) (string, error) {
+	for range 40 {
+		fi, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&fs.ModeSymlink == 0 {
+			return path, nil
+		}
+		next, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(next) {
+			// Relative to the link's physical directory, which exists since the link does.
+			dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+			if err != nil {
+				return "", err
+			}
+			next = filepath.Join(dir, next)
+		}
+		path = next
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
 }

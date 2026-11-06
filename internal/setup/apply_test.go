@@ -173,3 +173,36 @@ func TestPlanRejectsAgentSkillsDirAsSource(t *testing.T) {
 		t.Fatalf("installed link changed: %q", got)
 	}
 }
+
+func TestApplyCreatesMissingSymlinkedExcludesTarget(t *testing.T) {
+	e := newLinkEnv(t)
+	target := filepath.Join(e.home, "dotfiles", "git", "ignore") // neither file nor dirs exist
+	link := filepath.Join(e.home, ".config", "git", "ignore")
+	symlink(t, "../../dotfiles/git/ignore", link) // relative, dangling
+	applyPlan(t, fullCfg(e))
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink not kept: %v %v", fi, err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != ".agk/\n" {
+		t.Fatalf("target = %q, %v", data, err)
+	}
+	acts, _ := Plan(fullCfg(e))
+	if a := find(t, acts, link); a.Kind != KindOK {
+		t.Fatalf("second plan: %+v", a)
+	}
+}
+
+func TestApplyExcludesLinkInsideSymlinkedDir(t *testing.T) {
+	e := newLinkEnv(t)
+	// ~/.config -> dotfiles/config, and ~/.config/git/ignore -> ../../gitignore (relative to the real dir)
+	real := mkdir(t, e.home, "dotfiles", "config", "git")
+	symlink(t, filepath.Join(e.home, "dotfiles", "config"), filepath.Join(e.home, ".config"))
+	symlink(t, "../../gitignore", filepath.Join(real, "ignore"))
+	applyPlan(t, fullCfg(e))
+	if data, err := os.ReadFile(filepath.Join(e.home, "dotfiles", "gitignore")); err != nil || string(data) != ".agk/\n" {
+		t.Fatalf("physical target = %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(e.home, "gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("lexical path written: %v", err)
+	}
+}

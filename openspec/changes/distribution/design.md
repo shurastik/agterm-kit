@@ -50,8 +50,9 @@ it builds, so a layout change (say, a new `share/` subdirectory) lands in the sa
 code. `scripts/release.sh VERSION` checks it is on a clean `main` in sync with origin, runs
 `go test ./...` and `go vet ./...`, checks the tap checkout (on `main`, clean, fast-forwarded
 from `origin main`) before anything is published, tags `vVERSION` (reusing an existing tag only if
-it is on `HEAD`, so a failed run can be repeated; on such a rerun a leftover `Formula/agk.rb`, the
-only change allowed in the tap, is discarded and rendered again), pushes the tag, downloads the tag tarball,
+it is on `HEAD`, so a failed run can be repeated; on such a rerun a leftover `Formula/agk.rb` is
+discarded and rendered again, but only when it is the only change and both its working copy and
+index hold this version's render or the committed copy; any hand edit stops the release), pushes the tag, downloads the tag tarball,
 computes its sha256, renders the template into the tap checkout (`$AGK_TAP_DIR`, default
 `~/Projects/homebrew-tap`) as `Formula/agk.rb`, commits and pushes the tap to `origin main` explicitly.
 
@@ -112,8 +113,9 @@ gitignore does) comes after every `!` rule in the file: git's last matching rule
 negation (`!**/.agk/`, `!*`) might re-include it. Otherwise `.agk/` is appended, which makes it
 last again. A relative `core.excludesFile` is a `conflict`: git resolves it per repository, so
 appending would edit the current project's file. Positive globs that might already match are not evaluated; missing one only costs a
-redundant line. To append: resolve symlinks
-with `filepath.EvalSymlinks`, read the target, add a newline first if the file does not end with
+redundant line. To append: follow the symlink
+chain by hand (relative targets against the link's physical directory), allowing a final target
+that does not exist yet, unlike `filepath.EvalSymlinks`; read the target, add a newline first if the file does not end with
 one, add `.agk/`, write with `fsx.ReplaceFile` keeping the file mode. A missing file is created
 with its parent directory. Editing the resolved target keeps a dotfiles symlink intact;
 `ReplaceFile` alone would replace the symlink with a regular file.

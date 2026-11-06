@@ -147,3 +147,29 @@ func TestPlanRejectsSkillsDirWithoutSkills(t *testing.T) {
 		t.Fatalf("installed link touched: %v", err)
 	}
 }
+
+func TestPlanRejectsAgentSkillsDirAsSource(t *testing.T) {
+	e := newLinkEnv(t)
+	c := fullCfg(e)
+	applyPlan(t, c)
+	installed := filepath.Join(e.home, ".claude", "skills", "agk-review")
+	for _, src := range []string{
+		filepath.Join(e.home, ".claude", "skills"),
+		filepath.Join(e.home, ".codex", "skills"),
+	} {
+		c.SkillsDir = src
+		if _, err := Plan(c); err == nil || !strings.Contains(err.Error(), "agent skills directory") {
+			t.Errorf("%s: err = %v", src, err)
+		}
+	}
+	// also through a symlinked directory
+	alias := filepath.Join(e.home, "alias")
+	symlink(t, filepath.Join(e.home, ".claude", "skills"), alias)
+	c.SkillsDir = alias
+	if _, err := Plan(c); err == nil {
+		t.Error("symlinked agent skills dir accepted")
+	}
+	if got, _ := os.Readlink(installed); got != filepath.Join(e.skills, "agk-review") {
+		t.Fatalf("installed link changed: %q", got)
+	}
+}

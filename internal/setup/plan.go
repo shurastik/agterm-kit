@@ -97,6 +97,9 @@ func (c Config) skills() ([]string, error) {
 }
 
 func planLinks(c Config) ([]Action, error) {
+	if err := c.checkSource(); err != nil {
+		return nil, err
+	}
 	names, err := c.skills()
 	if err != nil {
 		return nil, err
@@ -126,6 +129,22 @@ func planLinks(c Config) ([]Action, error) {
 		acts = append(acts, stale...)
 	}
 	return acts, nil
+}
+
+// checkSource refuses a skills dir that is an agent's own skills directory
+// (directly or through symlinks): linking it into itself makes self-loops.
+func (c Config) checkSource() error {
+	src, err := filepath.EvalSymlinks(c.SkillsDir)
+	if err != nil {
+		return err
+	}
+	for _, ag := range c.agents() {
+		dst, err := filepath.EvalSymlinks(filepath.Join(ag.dir, "skills"))
+		if err == nil && dst == src {
+			return fmt.Errorf("%s is the %s agent skills directory, not an agk skills source", c.SkillsDir, ag.name)
+		}
+	}
+	return nil
 }
 
 func planLink(link, target string) Action {

@@ -50,7 +50,8 @@ it builds, so a layout change (say, a new `share/` subdirectory) lands in the sa
 code. `scripts/release.sh VERSION` checks it is on a clean `main` in sync with origin, runs
 `go test ./...` and `go vet ./...`, checks the tap checkout (on `main`, clean, fast-forwarded
 from `origin main`) before anything is published, tags `vVERSION` (reusing an existing tag only if
-it is on `HEAD`, so a failed run can be repeated), pushes the tag, downloads the tag tarball,
+it is on `HEAD`, so a failed run can be repeated; on such a rerun a leftover `Formula/agk.rb`, the
+only change allowed in the tap, is discarded and rendered again), pushes the tag, downloads the tag tarball,
 computes its sha256, renders the template into the tap checkout (`$AGK_TAP_DIR`, default
 `~/Projects/homebrew-tap`) as `Formula/agk.rb`, commits and pushes the tap to `origin main` explicitly.
 
@@ -81,7 +82,8 @@ the Cellar, so it is not reliable).
 ### D5. `internal/setup`: plan, then apply
 
 `setup.Plan(cfg) ([]Action, error)` refuses a skills directory without `agk-*` skills (it
-would plan every installed link as stale), then inspects the filesystem with `Lstat`/`Readlink` and returns
+would plan every installed link as stale) or one that resolves to an agent's own skills directory
+(links into itself), then inspects the filesystem with `Lstat`/`Readlink` and returns
 actions with a kind (`ok`, `create`, `repoint`, `remove`, `conflict`, `skip`, `append`,
 `missing`, `found`). `setup.Apply(actions)` performs the mutating ones. `--dry-run` prints the
 plan and stops. `cfg` carries the home directory, `getenv`, a `lookPath` and a `gitConfig` func,

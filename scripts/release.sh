@@ -30,7 +30,16 @@ check_tap() {
   [[ -d "$tap_dir/.git" ]] || die "tap checkout not found at $tap_dir (set AGK_TAP_DIR)"
   [[ "$(git -C "$tap_dir" branch --show-current)" == "$tap_branch" ]] || die "tap checkout is not on $tap_branch"
   git -C "$tap_dir" remote get-url origin >/dev/null 2>&1 || die "tap checkout has no origin remote"
-  [[ -z "$(git -C "$tap_dir" status --porcelain)" ]] || die "tap checkout has local changes"
+  local dirty
+  dirty="$(git -C "$tap_dir" status --porcelain)"
+  # A rerun after a failed tap commit finds its own formula left behind: drop it, it is rendered again.
+  if [[ -n "$dirty" && -n "$tag_exists" && "$dirty" == "$(git -C "$tap_dir" status --porcelain -- Formula/agk.rb)" ]]; then
+    echo "release: discarding the unfinished Formula/agk.rb of a previous run" >&2
+    git -C "$tap_dir" reset --quiet -- Formula/agk.rb
+    git -C "$tap_dir" checkout --quiet -- Formula/agk.rb 2>/dev/null || rm -f "$tap_dir/Formula/agk.rb"
+    dirty="$(git -C "$tap_dir" status --porcelain)"
+  fi
+  [[ -z "$dirty" ]] || die "tap checkout has local changes"
 }
 
 tag_exists=""

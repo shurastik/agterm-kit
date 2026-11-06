@@ -23,7 +23,8 @@ go mod tidy                      # Sync deps
 
 ```bash
 agk review start [--base main]   # spawn the "codex-review #N" companion; prints {"companion","dir"}
-agtermctl session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked
+A="${AGTERMCTL:-/Applications/agterm.app/Contents/MacOS/agtermctl}"; [ -x "$A" ] || A=agtermctl
+"$A" session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked --timeout 1800
 agk triage <dir>/review.json     # overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
 ```
 

@@ -46,6 +46,21 @@ check_tap() {
   [[ -z "$dirty" ]] || die "tap checkout has local changes"
 }
 
+# check_tap_ahead: the tap push would publish every local commit, so allow none, except this
+# release's own formula commit left by a run whose push failed.
+check_tap_ahead() {
+  local ahead
+  ahead="$(git -C "$tap_dir" rev-list "origin/$tap_branch..HEAD")"
+  [[ -z "$ahead" ]] && return 0
+  if [[ -n "$tag_exists" && "$(wc -l <<<"$ahead")" -eq 1 &&
+    "$(git -C "$tap_dir" log -1 --format=%s)" == "agk $version" &&
+    "$(git -C "$tap_dir" diff --name-only HEAD~1 HEAD)" == "Formula/agk.rb" ]]; then
+    echo "release: resuming the unpushed tap commit of a previous run" >&2
+    return 0
+  fi
+  die "tap checkout has local commits not on origin/$tap_branch"
+}
+
 # own_formula FILE: FILE is this version's render (any sha256) or the tap's committed formula.
 own_formula() {
   local content
@@ -67,7 +82,9 @@ if [[ -z "$dry_run" ]]; then
     tag_exists=1
   fi
   check_tap
-  git -C "$tap_dir" pull --quiet --ff-only origin "$tap_branch" || die "cannot fast-forward the tap checkout"
+  git -C "$tap_dir" fetch --quiet origin "$tap_branch" || die "cannot fetch the tap"
+  git -C "$tap_dir" merge --quiet --ff-only "origin/$tap_branch" || die "cannot fast-forward the tap checkout"
+  check_tap_ahead
 fi
 
 go vet ./...

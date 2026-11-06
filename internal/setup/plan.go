@@ -114,12 +114,20 @@ func planLinks(c Config) ([]Action, error) {
 		shipped[n] = true
 	}
 	var acts []Action
+	planned := map[string]string{} // physical skills dir -> agent that covers it
 	for _, ag := range c.agents() {
 		if !isDir(ag.dir) {
 			acts = append(acts, Action{Kind: KindSkip, Path: ag.dir, Detail: ag.name + " is not set up"})
 			continue
 		}
 		skillsDir := filepath.Join(ag.dir, "skills")
+		if real, err := filepath.EvalSymlinks(skillsDir); err == nil {
+			if other, ok := planned[real]; ok {
+				acts = append(acts, Action{Kind: KindSkip, Path: skillsDir, Detail: "same skills directory as " + other})
+				continue
+			}
+			planned[real] = ag.name
+		}
 		for _, n := range names {
 			acts = append(acts, planLink(filepath.Join(skillsDir, n), filepath.Join(c.SkillsDir, n)))
 		}

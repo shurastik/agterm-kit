@@ -242,3 +242,39 @@ func TestPlanRejectsRelativeSkillLinkThroughSymlinkedAgentDir(t *testing.T) {
 		t.Fatalf("installed link changed: %q", got)
 	}
 }
+
+func TestSharedAgentSkillsDirPlannedOnce(t *testing.T) {
+	e := newLinkEnv(t)
+	e.vars["CODEX_HOME"] = filepath.Join(e.home, ".claude") // both agents read one skills dir
+	legacy := filepath.Join(e.home, ".claude", "skills", LegacyLink)
+	symlink(t, "/old/agterm-codex-review", legacy)
+	c := fullCfg(e)
+	acts, err := Plan(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, a := range acts {
+		if a.Mutates() {
+			seen[a.Path]++
+		}
+	}
+	for p, n := range seen {
+		if n > 1 {
+			t.Errorf("%s planned %d times", p, n)
+		}
+	}
+	if err := Apply(acts); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy link left: %v", err)
+	}
+}
+
+func TestApplyRemoveAlreadyGoneIsFine(t *testing.T) {
+	gone := filepath.Join(realTemp(t), "agk-gone")
+	if err := Apply([]Action{{Kind: KindRemove, Path: gone}}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}

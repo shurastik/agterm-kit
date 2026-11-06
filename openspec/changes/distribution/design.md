@@ -52,7 +52,8 @@ code. `scripts/release.sh VERSION` checks it is on a clean `main` in sync with o
 from `origin main`) before anything is published, tags `vVERSION` (reusing an existing tag only if
 it is on `HEAD`, so a failed run can be repeated; on such a rerun a leftover `Formula/agk.rb` is
 discarded and rendered again, but only when it is the only change and both its working copy and
-index hold this version's render or the committed copy; any hand edit stops the release), pushes the tag, downloads the tag tarball,
+index hold this version's render or the committed copy; any hand edit stops the release; local tap
+commits not on `origin/main` stop it too, except this release's own unpushed formula commit), pushes the tag, downloads the tag tarball,
 computes its sha256, renders the template into the tap checkout (`$AGK_TAP_DIR`, default
 `~/Projects/homebrew-tap`) as `Formula/agk.rb`, commits and pushes the tap to `origin main` explicitly.
 
@@ -155,6 +156,12 @@ Homebrew's current Go builds it without fetching a toolchain.
   caveat says to rerun it.
 - [Codex or Claude change their user skills directory] → Both honour their config-dir variables
   (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`); a move is a one-line change in the plan.
+- [Known limitations, set aside by the owner during review as unrealistic for this machine]
+  → (a) An excludes-file symlink whose target has `..` after an intermediate symlink
+  (`~/current/../ignore` with `~/current` a link) is resolved lexically and may edit the wrong
+  file. (b) `GIT_CONFIG_NOSYSTEM` is parsed as true/yes/on or a decimal integer; git's `0x1` and
+  `1k` forms are not recognised. Both only matter for hand-crafted configurations; revisit if one
+  shows up.
 - [Agents not following symlinked skill directories] → Both do on this machine today
   (`~/.claude/skills/agterm-codex-review` is a link); covered by a manual check in tasks.
 

@@ -74,6 +74,9 @@ func putLink(link, target string) error {
 
 func removeLink(link string) error {
 	fi, err := os.Lstat(link)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // already gone: the goal is reached
+	}
 	if err != nil {
 		return err
 	}

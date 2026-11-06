@@ -25,3 +25,25 @@ var ReviewerTools string
 //
 //go:embed rereview-prompt.md
 var RereviewPrompt string
+
+// ApplierRules are the applier's standing rules: the claude applier gets them
+// as an appended system prompt, the codex applier at the top of each prompt.
+//
+//go:embed applier-rules.md
+var ApplierRules string
+
+// ApplyPrompt is the text/template of the applier's first round.
+//
+//go:embed apply-prompt.md
+var ApplyPrompt string
+
+// FixPrompt is the text/template of a later applier round.
+//
+//go:embed fix-prompt.md
+var FixPrompt string
+
+// ClaudeApplierSettings is the claude applier's settings layer: deny rules
+// for committing, pushing and rewriting history.
+//
+//go:embed claude-applier-settings.json
+var ClaudeApplierSettings []byte

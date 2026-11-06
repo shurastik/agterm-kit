@@ -134,7 +134,7 @@ func TestCodexHeadless(t *testing.T) {
 	if _, err := d.Headless(context.Background(), turn, ApplierFiles{}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	want = []string{"exec", "resume", "T-9", "-c", `sandbox_mode="workspace-write"`, "--json", "-m", "gpt-5.5", "-"}
+	want = []string{"exec", "-m", "gpt-5.5", "resume", "T-9", "-c", `sandbox_mode="workspace-write"`, "--json", "-"}
 	if !reflect.DeepEqual(f.args, want) {
 		t.Fatalf("resume args = %q", f.args)
 	}
@@ -169,5 +169,31 @@ func TestCodexNeutralizesTerminalControls(t *testing.T) {
 		if !bytes.Contains(out, []byte(`\u001b]52;c;ZXZpbA==\u0007\u001b[2J done`)) || !bytes.Contains(out, []byte(`x\u001b]52;c;QQ==\u0007`)) {
 			t.Errorf("%s lacks the visible escapes: %q", name, out)
 		}
+	}
+}
+
+// exec-level options (model, effort, extra args such as --profile) must come
+// before the resume subcommand: `codex exec resume` rejects --profile.
+func TestCodexResumeKeepsExecOptionsBeforeResume(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeExec{stdout: `{"type":"thread.started","thread_id":"T-1"}` + "\n"}
+	d := NewCodex(testRuntime(f))
+	w := config.Worker{Harness: config.Codex, Model: "gpt-5.5", Effort: "high", ExtraArgs: []string{"--profile", "review"}}
+	if _, err := d.Review(context.Background(), Turn{Worker: w, Root: "/repo", Dir: dir, Log: "reviewer.log", Session: "T-1", Resume: true}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"exec", "-m", "gpt-5.5", "-c", `model_reasoning_effort="high"`, "--profile", "review",
+		"resume", "T-1", "-c", `sandbox_mode="read-only"`, "--json",
+		"--output-schema", filepath.Join(dir, SchemaFile), "-o", filepath.Join(dir, OutputFile), "-"}
+	if !reflect.DeepEqual(f.args, want) {
+		t.Fatalf("args = %q", f.args)
+	}
+	if _, err := d.Headless(context.Background(), Turn{Worker: w, Root: "/repo", Dir: dir, Log: "applier.log", Session: "T-1", Resume: true}, ApplierFiles{}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"exec", "-m", "gpt-5.5", "-c", `model_reasoning_effort="high"`, "--profile", "review",
+		"resume", "T-1", "-c", `sandbox_mode="workspace-write"`, "--json", "-"}
+	if !reflect.DeepEqual(f.args, want) {
+		t.Fatalf("headless args = %q", f.args)
 	}
 }

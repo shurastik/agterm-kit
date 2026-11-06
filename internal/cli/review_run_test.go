@@ -104,6 +104,9 @@ func TestReviewRunFindings(t *testing.T) {
 	if s := readState(t, dir); s.Session != "T-1" {
 		t.Fatalf("session not recorded: %+v", s)
 	}
+	if !exists(filepath.Join(rd, startedFile)) {
+		t.Fatal("the loop marks the round started")
+	}
 	if b, _ := os.ReadFile(filepath.Join(dir, paneFile)); string(b) != "PANE-1\n" {
 		t.Fatalf("pane file = %q", b)
 	}

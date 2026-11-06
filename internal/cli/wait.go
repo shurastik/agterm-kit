@@ -57,10 +57,37 @@ func (e *Env) ReviewWait(ctx context.Context, args []string) int {
 	}
 	open := true
 	var status string
-	if !have {
+	left := time.Duration(timeout) * time.Second
+	if !have && k > 1 && !roundStarted(dir, k) {
+		// The companion may still show the last round's completed or blocked
+		// until the loop picks this round up: wait for that first.
+		status, err, _, left = e.waitPolling(ctx, companion, []string{"active"}, left, func() bool {
+			_, done, _ := readResult(rd)
+			return done || roundStarted(dir, k)
+		})
+		switch {
+		case errors.Is(err, agterm.ErrGone):
+			open = false
+		case errors.Is(err, agterm.ErrTimeout):
+			if res, have, err = readResult(rd); err != nil {
+				return e.errorf("%v", err)
+			}
+			if have {
+				return e.printJSON(res)
+			}
+			return e.printJSON(waitOutcome{Status: "running", Round: k})
+		case err != nil:
+			return e.errorf("wait for companion %s: %v", companion, err)
+		}
+		status = ""
+		if res, have, err = readResult(rd); err != nil {
+			return e.errorf("%v", err)
+		}
+	}
+	if !have && open {
 		// result.json first: agterm may already have auto-reset a completed
 		// status, and the wait would then block until its timeout.
-		status, err = e.Ctl.Wait(ctx, companion, []string{"completed", "blocked"}, time.Duration(timeout)*time.Second)
+		status, err = e.Ctl.Wait(ctx, companion, []string{"completed", "blocked"}, left)
 		switch {
 		case errors.Is(err, agterm.ErrGone):
 			open = false

@@ -231,7 +231,10 @@ func (e *Env) headlessRound(ctx context.Context, d harness.Driver, dir, root str
 	turn := harness.Turn{Worker: st.Worker, Root: root, Dir: rundir.RoundDir(dir, k), Log: applierLog,
 		Prompt: line, Session: st.Session, Resume: k > 1 && st.Session != ""}
 	session, err := d.Headless(ctx, turn, files, e.Stderr)
-	if session != "" && session != st.Session {
+	if session != st.Session { // "" when a first round never got a session
+		if session == "" && k > 1 {
+			session = st.Session // a failed resume keeps the session
+		}
 		st.Session = session
 		if werr := rundir.WriteJSON(dir, workerFile, st); werr != nil {
 			fmt.Fprintf(e.Stderr, "agk: warning: record applier session: %v\n", werr)
@@ -282,29 +285,37 @@ func readReport(dir string, k int) ([]byte, error) {
 	return b, err
 }
 
-// applyPollSlice is how long one status wait lasts before the report file is
-// checked again: the report decides even when the harness's agent-status
-// hooks never fire.
-var applyPollSlice = 5 * time.Second
+// pollSlice is how long one status wait lasts before the state on disk is
+// checked again: files decide even when a harness's agent-status hooks never
+// fire.
+var pollSlice = 5 * time.Second
 
-// waitSliced waits up to left for one of until, in applyPollSlice slices,
-// returning early with found when round k's report appears. It returns the
-// unused budget.
-func (e *Env) waitSliced(ctx context.Context, companion string, until []string, left time.Duration, dir string, k int) (status string, err error, found bool, rest time.Duration) {
+// waitPolling waits up to left for one of until, in pollSlice slices,
+// returning early with found when done reports true between slices. It
+// returns the unused budget.
+func (e *Env) waitPolling(ctx context.Context, companion string, until []string, left time.Duration, done func() bool) (status string, err error, found bool, rest time.Duration) {
 	for {
-		slice := min(applyPollSlice, left)
+		slice := min(pollSlice, left)
 		status, err = e.Ctl.Wait(ctx, companion, until, slice)
 		if !errors.Is(err, agterm.ErrTimeout) {
 			return status, err, false, left
 		}
 		left -= slice
-		if r, _ := readReport(dir, k); r != nil {
+		if done() {
 			return "", nil, true, left
 		}
 		if left <= 0 {
 			return "", err, false, 0
 		}
 	}
+}
+
+// waitSliced is waitPolling until round k's report appears.
+func (e *Env) waitSliced(ctx context.Context, companion string, until []string, left time.Duration, dir string, k int) (string, error, bool, time.Duration) {
+	return e.waitPolling(ctx, companion, until, left, func() bool {
+		r, _ := readReport(dir, k)
+		return r != nil
+	})
 }
 
 // ApplyWait implements `agk apply wait <run-dir> [--timeout SECONDS]`.

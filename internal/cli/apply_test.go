@@ -523,7 +523,7 @@ func TestApplyStartAndSendMarkRoundsStarted(t *testing.T) {
 func TestApplyWaitPollsTheReport(t *testing.T) {
 	h := newHarness(t, true)
 	dir := startedApply(t, h, 1)
-	applyPollSlice = 5 * time.Second // newHarness restores it after the test
+	pollSlice = 5 * time.Second // newHarness restores it after the test
 	h.ctl.WaitErr = agterm.ErrTimeout
 	n := 0
 	h.ctl.OnWait = func() {
@@ -545,7 +545,7 @@ func TestApplyWaitPollsTheReport(t *testing.T) {
 
 	// No report ever: the slices add up to the timeout, then running.
 	h = newHarnessLike(t, h)
-	applyPollSlice = 5 * time.Second
+	pollSlice = 5 * time.Second
 	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), apply.ReportFile))
 	h.ctl.WaitErr = agterm.ErrTimeout
 	if code := runApply(h, "wait", dir, "--timeout", "12"); code != 0 || !strings.Contains(h.out.String(), `"status":"running"`) {
@@ -556,5 +556,19 @@ func TestApplyWaitPollsTheReport(t *testing.T) {
 	}
 	if last := h.ctl.Calls[2].Args[2]; last != "2s" {
 		t.Fatalf("last slice = %s", last)
+	}
+}
+
+func TestApplyInlineFailedStartKeepsNoSession(t *testing.T) {
+	h := newHarness(t, false)
+	root := repoWith(t, h, "")
+	claude := h.drivers["claude"]
+	claude.sessions = []string{""}
+	claude.errs = []error{errors.New("claude failed: exec: claude: not found")}
+	if code := runApply(h, "start", "add-auth"); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if s := readApplyState(t, applyDir(root)); s.Session != "" {
+		t.Fatalf("an unconfirmed session must not be kept: %q", s.Session)
 	}
 }

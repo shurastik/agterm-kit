@@ -46,6 +46,7 @@ func TestClaudeReviewFirstRound(t *testing.T) {
 	}
 	want := []string{"-p", "--output-format", "stream-json", "--verbose",
 		"--json-schema", claudeSchema(t),
+		"--restricted", "--strict-mcp-config", "--tools", "Read,Grep,Glob,Bash",
 		"--permission-mode", "dontAsk", "--allowedTools", reviewerTools(),
 		"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "/x",
 		"--session-id", "S-1"}
@@ -202,4 +203,30 @@ func claudeSchema(t *testing.T) string {
 	delete(m, "$schema")
 	b, _ := json.Marshal(m)
 	return string(b)
+}
+
+// A session id agk made up is only real once claude reports it; a failed
+// start must not leave later rounds resuming a session that never existed.
+func TestClaudeUnconfirmedSessionIsNotReturned(t *testing.T) {
+	f := &fakeExec{stdout: "claude: command not found\n", err: errors.New("exec: claude: not found")}
+	d := NewClaude(testRuntime(f))
+	turn := Turn{Worker: config.Worker{Harness: config.Claude}, Root: "/r", Dir: t.TempDir(), Log: "reviewer.log"}
+	if sess, err := d.Review(context.Background(), turn, io.Discard); err == nil || sess != "" {
+		t.Fatalf("review: session %q, err %v", sess, err)
+	}
+	turn.Session = "S-PLANNED"
+	if sess, _ := d.Headless(context.Background(), turn, ApplierFiles{}, io.Discard); sess != "" {
+		t.Fatalf("headless: session %q", sess)
+	}
+	// Confirmed by the init event even when the turn then fails.
+	f.stdout = `{"type":"system","subtype":"init","session_id":"S-PLANNED"}` + "\n"
+	if sess, _ := d.Review(context.Background(), turn, io.Discard); sess != "S-PLANNED" {
+		t.Fatalf("confirmed session %q", sess)
+	}
+	// A resumed session stays the session, whatever happens.
+	f.stdout = ""
+	turn.Resume = true
+	if sess, _ := d.Review(context.Background(), turn, io.Discard); sess != "S-PLANNED" {
+		t.Fatalf("resumed session %q", sess)
+	}
 }

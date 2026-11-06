@@ -40,12 +40,17 @@ func (c *Codex) Interactive(w config.Worker, root string, _ ApplierFiles, _, kic
 	return append(argv, kickoff)
 }
 
-// start is `exec` with a sandbox, or `exec resume <thread>` keeping it.
-func codexStart(t Turn, sandbox string) []string {
+// codexArgs is `exec` with a sandbox, or `exec <tuning> resume <thread>`
+// keeping it; exec-level options must precede the resume subcommand, which
+// rejects some of them (--profile). out are the output flags.
+func codexArgs(t Turn, sandbox string, out ...string) []string {
+	tuning := codexTuning(t.Worker)
 	if t.Resume && t.Session != "" {
-		return []string{"exec", "resume", t.Session, "-c", fmt.Sprintf("sandbox_mode=%q", sandbox), "--json"}
+		args := append(append([]string{"exec"}, tuning...), "resume", t.Session, "-c", fmt.Sprintf("sandbox_mode=%q", sandbox), "--json")
+		return append(append(args, out...), "-")
 	}
-	return []string{"exec", "-s", sandbox, "-C", t.Root, "--json"}
+	args := append([]string{"exec", "-s", sandbox, "-C", t.Root, "--json"}, out...)
+	return append(append(args, tuning...), "-")
 }
 
 func (c *Codex) run(ctx context.Context, t Turn, args []string, term io.Writer) (string, error) {
@@ -64,8 +69,7 @@ func (c *Codex) run(ctx context.Context, t Turn, args []string, term io.Writer) 
 }
 
 func (c *Codex) Headless(ctx context.Context, t Turn, _ ApplierFiles, term io.Writer) (string, error) {
-	args := append(codexStart(t, "workspace-write"), codexTuning(t.Worker)...)
-	return c.run(ctx, t, append(args, "-"), term)
+	return c.run(ctx, t, codexArgs(t, "workspace-write"), term)
 }
 
 func (c *Codex) Review(ctx context.Context, t Turn, term io.Writer) (string, error) {
@@ -73,9 +77,7 @@ func (c *Codex) Review(ctx context.Context, t Turn, term io.Writer) (string, err
 	if err := os.WriteFile(schema, assets.ReviewSchema, 0o644); err != nil {
 		return t.Session, err
 	}
-	args := append(codexStart(t, "read-only"), "--output-schema", schema, "-o", filepath.Join(t.Dir, OutputFile))
-	args = append(args, codexTuning(t.Worker)...)
-	return c.run(ctx, t, append(args, "-"), term)
+	return c.run(ctx, t, codexArgs(t, "read-only", "--output-schema", schema, "-o", filepath.Join(t.Dir, OutputFile)), term)
 }
 
 // renderCodex turns a codex --json event into display lines.

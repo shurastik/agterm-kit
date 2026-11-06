@@ -286,3 +286,64 @@ func TestReviewHelpListsWait(t *testing.T) {
 		t.Fatalf("help = %q", h.out)
 	}
 }
+
+// round2Dir is a run at round 2 whose round 1 finished, with companion C-1.
+func round2Dir(t *testing.T) string {
+	t.Helper()
+	dir := waitDir(t, "C-1\n", completedResult)
+	rd, _ := rundir.MakeRound(dir, 2)
+	os.WriteFile(filepath.Join(rd, "prompt.md"), []byte("R2"), 0o644)
+	rundir.SetRound(dir, 2)
+	return dir
+}
+
+// After `review send`, the companion may still show round 1's completed: the
+// wait must not take it for round 2's outcome.
+func TestReviewWaitIgnoresTheLastRoundsStatus(t *testing.T) {
+	h := newHarness(t, true)
+	dir := round2Dir(t)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}, {Status: "completed"}}
+	n := 0
+	h.ctl.OnWait = func() {
+		if n++; n == 2 {
+			os.WriteFile(filepath.Join(rundir.RoundDir(dir, 2), "result.json"), []byte(`{"status":"completed","round":2,"findings":0,"verdict":"approve"}`), 0o644)
+		}
+	}
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.out.String(), `"round":2`) || !strings.Contains(h.out.String(), "approve") {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	assertCalls(t, h.ctl,
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "30m0s"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "30m0s"}},
+	)
+}
+
+func TestReviewWaitRoundNeverStarts(t *testing.T) {
+	h := newHarness(t, true)
+	dir := round2Dir(t)
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":2}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "1m0s"}})
+}
+
+func TestReviewWaitStartedRoundTrustsStatus(t *testing.T) {
+	h := newHarness(t, true)
+	dir := round2Dir(t)
+	os.WriteFile(filepath.Join(rundir.RoundDir(dir, 2), startedFile), nil, 0o644)
+	h.ctl.WaitStatus = "blocked"
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"blocked","round":2}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	assertCalls(t, h.ctl, waitCall)
+}

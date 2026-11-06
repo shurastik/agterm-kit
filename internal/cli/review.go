@@ -220,6 +220,7 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, r
 		return fail(review.ReasonSetupFailed, err)
 	}
 	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d started, run dir %s\n", run.num, k, run.dir)
+	markStarted(run.dir, k) // before the status: statuses from now on are this round's
 	rep.set(ctx, "active", review.ReviewingLine(l))
 	turn := harness.Turn{Worker: run.state.Worker, Root: run.root, Dir: rd, Log: reviewLog, Prompt: string(prompt),
 		Session: run.state.Session, Resume: run.state.Session != ""}

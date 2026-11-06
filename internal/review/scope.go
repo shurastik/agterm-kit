@@ -152,3 +152,12 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 	}
 	return out.String(), nil
 }
+
+// RepoRoot returns the top-level directory of the git repository holding dir.
+func RepoRoot(ctx context.Context, dir string) (string, error) {
+	out, err := gitOut(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}

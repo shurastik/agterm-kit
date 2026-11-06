@@ -17,6 +17,11 @@ Usage:
                                   {"status":"completed|blocked|cancelled|running",...}; closes the
                                   companion after a completed review.
   agk triage <review.json>        Triage findings in an agterm overlay; prints decisions JSON.
+  agk config [--applier H[:M]] [--reviewer H[:M]]
+                                  Print the resolved worker configuration (harness, model, effort,
+                                  extra args, permission mode) and where each value comes from:
+                                  flag, .agk.toml in the repo root, ~/.config/agk/config.toml
+                                  ($XDG_CONFIG_HOME/agk/config.toml), or default.
   agk setup [--skills-dir DIR] [--dry-run]
                                   Link the agk-* skills for Claude Code and Codex, add .agk/ to the
                                   global git ignore, check dependencies. Rerun after every upgrade.
@@ -45,6 +50,8 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return e.reviewCmd(ctx, args[1:])
 	case "triage":
 		return e.Triage(ctx, args[1:])
+	case "config":
+		return e.Config(ctx, args[1:])
 	case "setup":
 		return e.Setup(args[1:])
 	case "version":

@@ -67,6 +67,10 @@ func newHarness(t *testing.T, inAgterm bool) *harness {
 		Now:        func() time.Time { return time.Date(2026, 11, 5, 10, 0, 0, 0, time.Local) },
 		Executable: func() (string, error) { return "/usr/local/bin/agk", nil },
 		Cwd:        t.TempDir(),
+		Home:       t.TempDir(),
+		RepoRoot: func(context.Context, string) (string, error) {
+			return "", errors.New("not a git repository")
+		},
 		Collect: func(context.Context, string, string) (review.Scope, error) {
 			return review.Scope{}, errors.New("collect not scripted")
 		},

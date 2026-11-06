@@ -29,6 +29,7 @@ type Env struct {
 	Ctl            agterm.Ctl
 	Runner         review.Runner
 	Collect        func(ctx context.Context, dir, base string) (review.Scope, error)
+	RepoRoot       func(ctx context.Context, dir string) (string, error)
 	Now            func() time.Time
 	Executable     func() (string, error)
 	Cwd            string
@@ -57,6 +58,7 @@ func NewEnv() (*Env, error) {
 		Ctl:        agterm.NewCLI(),
 		Runner:     review.NewCodex(),
 		Collect:    review.Collect,
+		RepoRoot:   review.RepoRoot,
 		Now:        time.Now,
 		Executable: os.Executable,
 		Cwd:        cwd,

@@ -7,9 +7,9 @@
 
 ## 2. Worker configuration (`internal/config`, `agk config`)
 
-- [ ] 2.1 Add `github.com/BurntSushi/toml`. Implement load and strict validation per design D8 and the "Configuration validation" requirement (unknown table/key, harness, types, `permission_mode` placement, unquotable `extra_args`). Verify with table tests, one per scenario, checking that errors name the file and key
-- [ ] 2.2 Implement resolution per the precedence, role-flag and harness-switch rules (flag > `.agk.toml` at the repo root > `$XDG_CONFIG_HOME`/`~/.config/agk/config.toml` > defaults, with the source of each key) and `Same()`. Verify with tests for every scenario of "Configuration sources and precedence", "Role flag" and "Worker roles and defaults"
-- [ ] 2.3 Add `agk config [--applier H[:M]] [--reviewer H[:M]]` with JSON output and the same-worker warning, plus the usage text. Verify with CLI tests for sources per key, exit 1 on an invalid file, and the warning on stderr
+- [x] 2.1 Add `github.com/BurntSushi/toml`. Implement load and strict validation per design D8 and the "Configuration validation" requirement (unknown table/key, harness, types, `permission_mode` placement, unquotable `extra_args`). Verify with table tests, one per scenario, checking that errors name the file and key
+- [x] 2.2 Implement resolution per the precedence, role-flag and harness-switch rules (flag > `.agk.toml` at the repo root > `$XDG_CONFIG_HOME`/`~/.config/agk/config.toml` > defaults, with the source of each key) and `Same()`. Verify with tests for every scenario of "Configuration sources and precedence", "Role flag" and "Worker roles and defaults"
+- [x] 2.3 Add `agk config [--applier H[:M]] [--reviewer H[:M]]` with JSON output and the same-worker warning, plus the usage text. Verify with CLI tests for sources per key, exit 1 on an invalid file, and the warning on stderr
 
 ## 3. Harness drivers (`internal/harness`)
 

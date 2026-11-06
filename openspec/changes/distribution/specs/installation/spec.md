@@ -83,6 +83,11 @@ Codex skills directory (`$CODEX_HOME/skills`, default `~/.codex/skills`), creati
 - **WHEN** the user runs `agk setup`
 - **THEN** the Claude Code links are created, no `~/.codex` is created, and the output reports Codex as skipped
 
+#### Scenario: Agents share one skills directory
+- **GIVEN** `CODEX_HOME` points at `~/.claude`, so both agents read `~/.claude/skills`, which holds the legacy `agterm-codex-review` link
+- **WHEN** the user runs `agk setup`
+- **THEN** each link is created or removed once, Codex is reported as skipped for sharing Claude Code's skills directory, and the exit status is 0
+
 ### Requirement: Setup is idempotent
 Running `agk setup` again SHALL leave correct links untouched and repoint an agk-named symlink that
 points elsewhere. It SHALL NOT replace a regular file or directory with a link; such a path is
@@ -133,6 +138,11 @@ its target.
 - **GIVEN** `~/.config/git/ignore` contains `**/.claude/settings.local.json` and no `.agk` line
 - **WHEN** the user runs `agk setup` twice
 - **THEN** the file contains its original line followed by exactly one `.agk/` line
+
+#### Scenario: Global ignore explicitly disabled
+- **GIVEN** the git config sets `core.excludesFile` to an empty value, which turns the global excludes file off
+- **WHEN** the user runs `agk setup`
+- **THEN** no excludes file is written, the output reports a conflict asking for an absolute path, the skill links are still set up, and the exit status is 1
 
 #### Scenario: Dotfiles symlink preserved
 - **GIVEN** the excludes file is a symlink into a dotfiles repository

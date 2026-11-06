@@ -89,6 +89,14 @@ The review process SHALL print a header line with the review number, start date 
 - **WHEN** codex prints `thinking` and then `done` during review #3 started at 2026-11-05 17:53:55
 - **THEN** the first line reads `[2026-11-05 17:53:55] agk: review #3 started, run dir <dir>` and each codex line is shown as `[<date> <time>] thinking` and `[<date> <time>] done`, both on screen and in `codex.log`
 
+### Requirement: Untrusted output cannot drive the terminal
+Reviewer output shown in the companion terminal and written to `codex.log` SHALL carry terminal control characters and bidi overrides only as visible `\uXXXX` (or `\xNN` for invalid bytes) escapes, including sequences split across output chunks.
+
+#### Scenario: Escape sequence from a reviewed file
+- **GIVEN** an untracked file containing an OSC 52 clipboard sequence and a screen-clear sequence
+- **WHEN** codex echoes it while reviewing
+- **THEN** the companion terminal and `codex.log` show the sequence as visible escapes and contain no raw ESC or BEL byte
+
 ### Requirement: Read-only codex run with structured output
 The review SHALL run codex non-interactively with a read-only sandbox in the repository root, constrained to the bundled review output schema (verdict, summary, findings with severity/title/body/file/line range/confidence/recommendation, next steps).
 

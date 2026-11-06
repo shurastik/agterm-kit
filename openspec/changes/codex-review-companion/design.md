@@ -81,6 +81,9 @@ Alternative considered: passing findings as JSON into the script and rendering c
 ### D12. Skill
 `skill/agterm-codex-review/SKILL.md`, installed by symlink into `~/.claude/skills/`. It tells the agent: run `agk review start --base <base>`; wait with a background `agtermctl session wait --target <companion> --until completed --until blocked`; on `blocked` read `codex.log` and report; on `completed` run `agk triage <dir>/review.json`; then fix `fix` items, raise `discuss` items in chat with their notes, ignore `skip`; re-run until approve. On triage exit 3 use `AskUserQuestion`; on exit 2 ask in chat. `agk` itself is installed with `go install ./cmd/agk`.
 
+### D14. Terminal-safe output
+`internal/termsafe` owns the rule for what may reach a terminal raw (no C0 except `\n`/`\t`, no DEL, no C1, no bidi embeddings/overrides/isolates, no U+2028/2029). `termsafe.Writer` applies it to the codex stream before stamping, holding an incomplete UTF-8 sequence across writes; the triage fallback table uses the same rule. Codex echoes the prompt, which inlines untracked repository files, so this is a trust boundary (review finding). A source test rejects literal bidi controls in `.go` files.
+
 ### D13. Timestamped log
 `review.StampWriter` prefixes each line with `[YYYY-MM-DD HH:MM:SS] ` (local time, taken when the line starts, correct across partial writes). `Codex.Run` wraps the combined terminal + `codex.log` stream with it; `run` prints a stamped header `agk: review #N started, run dir <dir>` and a stamped summary line. exec funnels codex stdout and stderr through one pipe when they share a writer, so the stamp writer sees no concurrent writes.
 
@@ -92,4 +95,5 @@ Alternative considered: passing findings as JSON into the script and rendering c
 - [Huge diffs blow the prompt] → Capped diff plus stat; codex reads files itself.
 - [Codex hangs] → No automatic timeout; the user sees it in the companion and can close it, which makes `session wait` exit 2; the skill treats exit 2 as cancelled.
 - [Parent session closes mid-review] → Companion closes with it; nothing to clean up beyond the run dir.
-- [Shared companion name `codex-review` across concurrent reviews] → Accepted; ids differ and `start` prints the id.
+- [Overlay cleanup on cancel is check-then-act: between `tree` confirming our page and `overlay close`, the user could close it and another process open a new overlay, which close would then hit] → Accepted residual risk: agterm 0.40 has no close-by-pageID and `agtermctl` dies on SIGINT/SIGTERM without closing its page (verified), so no atomic cleanup exists; the window is a few milliseconds and needs two independent actions inside it. Dropping cleanup would bring back the stuck-page bug. Tracked as a follow-up to request close-by-pageID upstream.
+- [Concurrent reviews] → Each review gets its own number and companion (`codex-review #N`); ids differ and `start` prints the id.

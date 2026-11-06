@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shurastik/agterm-kit/assets"
+	"github.com/shurastik/agterm-kit/internal/termsafe"
 )
 
 // Runner runs the reviewer for a prepared run directory.
@@ -138,7 +139,7 @@ func (c *Codex) Run(ctx context.Context, root, dir, prompt string, term io.Write
 	defer logf.Close()
 	args := []string{"exec", "-s", "read-only", "-C", root, "--ephemeral",
 		"--output-schema", schema, "-o", c.OutputPath(dir), "-"}
-	if err := c.Exec(ctx, c.Bin, args, root, childEnv(c.Environ()), strings.NewReader(prompt), NewStampWriter(io.MultiWriter(term, logf), c.clock())); err != nil {
+	if err := c.Exec(ctx, c.Bin, args, root, childEnv(c.Environ()), strings.NewReader(prompt), NewStampWriter(termsafe.NewWriter(io.MultiWriter(term, logf)), c.clock())); err != nil {
 		return fmt.Errorf("codex failed: %w", err)
 	}
 	return nil

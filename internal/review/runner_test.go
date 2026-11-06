@@ -217,3 +217,27 @@ func shortGraces(t *testing.T) {
 	interruptGrace, killGrace = 200*time.Millisecond, 200*time.Millisecond
 	t.Cleanup(func() { interruptGrace, killGrace = oi, ok })
 }
+
+// Codex echoes the prompt, which carries untracked repository files; their
+// escape sequences must not drive the companion terminal or a later cat of the log.
+func TestCodexRunNeutralizesTerminalControls(t *testing.T) {
+	dir := t.TempDir()
+	c := &Codex{Bin: "codex", Now: fixedNow, Environ: os.Environ, Exec: func(_ context.Context, _ string, _ []string, _ string, _ []string, _ io.Reader, out io.Writer) error {
+		io.WriteString(out, "file: \x1b]52;c;ZXZp")
+		io.WriteString(out, "bA==\x07\x1b[2J done\n")
+		return nil
+	}}
+	var term bytes.Buffer
+	if err := c.Run(context.Background(), "/repo", dir, "P", &term); err != nil {
+		t.Fatal(err)
+	}
+	logb, _ := os.ReadFile(filepath.Join(dir, "codex.log"))
+	for name, out := range map[string][]byte{"terminal": term.Bytes(), "codex.log": logb} {
+		if bytes.IndexByte(out, 0x1b) >= 0 || bytes.IndexByte(out, 0x07) >= 0 {
+			t.Errorf("%s got raw control bytes: %q", name, out)
+		}
+		if !bytes.Contains(out, []byte(`\u001b]52;c;ZXZpbA==\u0007\u001b[2J done`)) {
+			t.Errorf("%s lacks the visible escapes: %q", name, out)
+		}
+	}
+}

@@ -37,6 +37,8 @@ type Fake struct {
 	CloseErr     error
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
+	// OnWait, when set, runs before Wait returns (e.g. to write result.json).
+	OnWait func()
 	// OnNewCompanion, when set, runs before NewCompanion returns.
 	OnNewCompanion func()
 	// OnOverlay, when set, runs before OverlayHTML returns (e.g. to read the page file).
@@ -95,6 +97,9 @@ func (f *Fake) OverlayHTML(ctx context.Context, target, file string) (agterm.Out
 // Wait records target, the joined statuses and the timeout.
 func (f *Fake) Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error) {
 	f.record(ctx, "Wait", target, strings.Join(until, ","), timeout.String())
+	if f.OnWait != nil {
+		f.OnWait()
+	}
 	return f.WaitStatus, f.WaitErr
 }
 

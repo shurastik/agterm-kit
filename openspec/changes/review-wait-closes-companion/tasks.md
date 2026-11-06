@@ -11,8 +11,8 @@
 
 ## 3. review wait
 
-- [ ] 3.1 Add `agk review wait <run-dir> [--timeout SECONDS]` with argument validation (not a `.agk/reviews/<run>` dir, non-positive or non-integer timeout, malformed `companion` file → exit 1, no `Ctl` calls) and wire it into `reviewCmd` and the usage text; verify with tests in a new `review_wait_test.go` and `agk review --help` output
-- [ ] 3.2 Implement outcome resolution per design D4 and verify with tests covering every spec scenario: completed with findings (outcome JSON, `Close` called), blocked with and without `result.json` (no `Close`), cancelled (`ErrGone`, no `result.json`), running (`ErrTimeout`, no `result.json`, no `Close`), timeout with `completed` `result.json` (`Close` called), `result.json` present before waiting (no `Wait` call), user already closed the companion (`Close` → `ErrGone`, no stderr warning), close failure (warning, exit 0), inline run with and without `result.json` (no `Ctl` calls / exit 1), unparsable or unknown-status `result.json` (exit 1)
+- [x] 3.1 Add `agk review wait <run-dir> [--timeout SECONDS]` with argument validation (not a `.agk/reviews/<run>` dir, non-positive or non-integer timeout, malformed `companion` file → exit 1, no `Ctl` calls) and wire it into `reviewCmd` and the usage text; verify with tests in a new `review_wait_test.go` and `agk review --help` output
+- [x] 3.2 Implement outcome resolution per design D4 and verify with tests covering every spec scenario: completed with findings (outcome JSON, `Close` called), blocked with and without `result.json` (no `Close`), cancelled (`ErrGone`, no `result.json`), running (`ErrTimeout`, no `result.json`, no `Close`), timeout with `completed` `result.json` (`Close` called), `result.json` present before waiting (no `Wait` call), user already closed the companion (`Close` → `ErrGone`, no stderr warning), close failure (warning, exit 0), inline run with and without `result.json` (no `Ctl` calls / exit 1), unparsable or unknown-status `result.json` (exit 1)
 
 ## 4. Skill and docs
 

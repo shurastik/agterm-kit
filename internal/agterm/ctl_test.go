@@ -257,12 +257,16 @@ func TestOverlayHTMLCancelClosesOwnPage(t *testing.T) {
 					return Result{Stdout: []byte(treeWith("S-1", tc.shown))}
 				}
 			}}
-			c := &CLI{Bin: "agtermctl", Socket: "/s", Exec: s.run}
+			c := &CLI{Bin: "agtermctl", Socket: "/s", Window: "W-1", Exec: s.run}
 			if _, err := c.OverlayHTML(ctx, "S-1", file); !errors.Is(err, context.Canceled) {
 				t.Fatalf("err = %v", err)
 			}
 			closed := false
 			for i, a := range s.calls {
+				// tree shows only one window: ask for the caller's, not the frontmost.
+				if a[0] == "tree" && !reflect.DeepEqual(a, []string{"tree", "--json", "--window", "W-1", "--socket", "/s"}) {
+					t.Errorf("tree args = %q", a)
+				}
 				if strings.Join(a[:3], " ") == "session overlay close" {
 					closed = true
 					if !reflect.DeepEqual(a, []string{"session", "overlay", "close", "--target", "S-1", "--socket", "/s"}) {

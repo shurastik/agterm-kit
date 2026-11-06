@@ -44,7 +44,7 @@
 ## 7. Integration checks
 
 - [x] 7.1 Run `gofmt -l .` (empty), `go vet ./...`, `go test ./...`, `go build ./...` and confirm all pass
-- [ ] 7.2 E2E in agterm on a real repo (e.g. `~/Projects/gm-helper`, `--base HEAD~3`): companion `codex-review` appears under the session, info line changes, glyph ends `completed`, `agtermctl session wait` returns 0, `agtermctl tree --json` shows the companion's `parent`; `agk triage` opens the overlay (visible in `htmlOverlays`), submit prints decisions JSON and writes `decisions.json`, ⌘W exits 2
+- [x] 7.2 E2E in agterm on a real repo (e.g. `~/Projects/gm-helper`, `--base HEAD~3`): companion `codex-review` appears under the session, info line changes, glyph ends `completed`, `agtermctl session wait` returns 0, `agtermctl tree --json` shows the companion's `parent`; `agk triage` opens the overlay (visible in `htmlOverlays`), submit prints decisions JSON and writes `decisions.json`, ⌘W exits 2
 - [x] 7.3 Fallback E2E: `env -u AGTERM_ENABLED agk triage <review.json>` prints the table and exits 3; `env -u AGTERM_ENABLED agk review start` runs inline and prints `"companion": null`
 - [x] 7.4 Run `openspec validate codex-review-companion --strict` and confirm it passes
 

@@ -46,6 +46,9 @@ type CLI struct {
 	Bin string
 	// Socket, when set, is passed as --socket; agtermctl ignores AGTERM_SOCKET.
 	Socket string
+	// Window is the caller's window ($AGTERM_WINDOW_ID); `tree` only shows one
+	// window, the frontmost unless told otherwise.
+	Window string
 	Exec   ExecFunc
 }
 
@@ -71,7 +74,12 @@ func isExecutable(p string) bool {
 
 // NewCLI returns a CLI for the agterm instance this process runs in.
 func NewCLI() *CLI {
-	return &CLI{Bin: ResolveBin(os.Getenv, isExecutable), Socket: os.Getenv("AGTERM_SOCKET"), Exec: RunProcess}
+	return &CLI{
+		Bin:    ResolveBin(os.Getenv, isExecutable),
+		Socket: os.Getenv("AGTERM_SOCKET"),
+		Window: os.Getenv("AGTERM_WINDOW_ID"),
+		Exec:   RunProcess,
+	}
 }
 
 func (c *CLI) run(ctx context.Context, args ...string) (Result, error) {
@@ -203,7 +211,11 @@ func (c *CLI) OverlayHTML(ctx context.Context, target, file string) (Outcome, er
 
 // showsFile reports whether target currently shows an HTML overlay of file.
 func (c *CLI) showsFile(ctx context.Context, target, file string) bool {
-	res, err := c.runOK(ctx, "tree", "--json")
+	args := []string{"tree", "--json"}
+	if c.Window != "" {
+		args = append(args, "--window", c.Window)
+	}
+	res, err := c.runOK(ctx, args...)
 	if err != nil {
 		return false
 	}

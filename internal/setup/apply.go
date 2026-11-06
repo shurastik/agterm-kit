@@ -148,7 +148,9 @@ func linkChain(path string) ([]string, error) {
 				return nil, err
 			}
 			next = filepath.Join(dir, next)
-		} else if dir, err := filepath.EvalSymlinks(filepath.Dir(next)); err == nil {
+		}
+		// Keep every hop's directory physical, so callers can compare it with real paths.
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(next)); err == nil {
 			next = filepath.Join(dir, filepath.Base(next))
 		}
 		path = next

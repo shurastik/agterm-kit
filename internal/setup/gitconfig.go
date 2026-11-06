@@ -28,7 +28,7 @@ func GlobalGitConfig(key string) (value string, set bool, err error) {
 }
 
 func gitConfigGet(scope, key string) (string, bool, error) {
-	out, err := exec.Command("git", "config", scope, "--includes", "--path", "--get", key).Output()
+	out, err := exec.Command("git", "config", scope, "--includes", "--path", "-z", "--get", key).Output()
 	var exit *exec.ExitError
 	switch {
 	case errors.Is(err, exec.ErrNotFound):
@@ -38,7 +38,7 @@ func gitConfigGet(scope, key string) (string, bool, error) {
 	case err != nil:
 		return "", false, err
 	}
-	return strings.TrimSpace(string(out)), true, nil
+	return strings.TrimSuffix(string(out), "\x00"), true, nil // -z: spaces in paths are significant
 }
 
 // noSystem parses GIT_CONFIG_NOSYSTEM like git's boolean env vars: true/yes/on

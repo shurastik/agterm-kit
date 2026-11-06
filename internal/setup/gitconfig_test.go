@@ -85,3 +85,14 @@ func TestGlobalGitConfigHonoursNoSystem(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalGitConfigKeepsSignificantSpaces(t *testing.T) {
+	dir := realTemp(t)
+	global := filepath.Join(dir, "global")
+	os.WriteFile(global, []byte("[core]\n\texcludesFile = \"/tmp/agk-ignore \"\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(dir, "nosystem"))
+	if got, _, err := GlobalGitConfig("core.excludesFile"); err != nil || got != "/tmp/agk-ignore " {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}

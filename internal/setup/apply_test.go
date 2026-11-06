@@ -222,3 +222,23 @@ func TestPlanRejectsSkillLinkedFromAgentDir(t *testing.T) {
 		t.Fatalf("installed link changed: %q", got)
 	}
 }
+
+func TestPlanRejectsRelativeSkillLinkThroughSymlinkedAgentDir(t *testing.T) {
+	e := newLinkEnv(t)
+	// ~/.claude -> dotfiles/claude (agent config kept in dotfiles)
+	os.Remove(filepath.Join(e.home, ".claude"))
+	real := mkdir(t, e.home, "dotfiles", "claude")
+	symlink(t, real, filepath.Join(e.home, ".claude"))
+	installed := filepath.Join(real, "skills", "agk-review")
+	symlink(t, filepath.Join(e.skills, "agk-review"), installed)
+	src := mkdir(t, e.home, "newskills")
+	symlink(t, "../.claude/skills/agk-review", filepath.Join(src, "agk-review"))
+	c := fullCfg(e)
+	c.SkillsDir = src
+	if _, err := Plan(c); err == nil || !strings.Contains(err.Error(), "agent skills directory") {
+		t.Fatalf("err = %v", err)
+	}
+	if got, _ := os.Readlink(installed); got != filepath.Join(e.skills, "agk-review") {
+		t.Fatalf("installed link changed: %q", got)
+	}
+}

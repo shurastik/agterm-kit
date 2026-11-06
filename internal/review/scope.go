@@ -52,10 +52,10 @@ func Collect(ctx context.Context, dir, base string) (Scope, error) {
 	}
 	s.MergeBase = strings.TrimSpace(mb)
 	exclude := ":(exclude)" + agkDir
-	if s.Diff, err = gitOut(ctx, s.Root, "diff", "--no-color", "--no-ext-diff", s.MergeBase, "--", ".", exclude); err != nil {
+	if s.Diff, err = gitOut(ctx, s.Root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", s.MergeBase, "--", ".", exclude); err != nil {
 		return Scope{}, err
 	}
-	if s.Stat, err = gitOut(ctx, s.Root, "diff", "--no-color", "--stat", s.MergeBase, "--", ".", exclude); err != nil {
+	if s.Stat, err = gitOut(ctx, s.Root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", s.MergeBase, "--", ".", exclude); err != nil {
 		return Scope{}, err
 	}
 	list, err := gitOut(ctx, s.Root, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", exclude)

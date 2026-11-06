@@ -42,7 +42,9 @@ session, and hands back structured findings plus the user's per-finding decision
    ```
    - exit 0: stdout is the decision list
      `[{"id":1,"title":"…","file":"…","decision":"fix|skip|discuss","note":"…"}]`
-     (also saved as `<dir>/decisions.json`). `[]` means no findings: the review is clean.
+     (also saved as `<dir>/decisions.json`). `[]` means no findings: check `verdict` in
+     `review.json`. `approve` is a clean review. `needs-attention` with no findings is not clean:
+     show the user its `summary` and `next_steps` and ask how to proceed.
    - exit 2: the user closed the overlay. Ask in chat how to proceed; do not assume decisions.
    - exit 3: no agterm UI. stdout is a markdown table of the findings; show it and collect the
      decisions with `AskUserQuestion` (one question per finding, options fix / skip / discuss).
@@ -55,8 +57,8 @@ session, and hands back structured findings plus the user's per-finding decision
      and wait for the answer.
    - `skip`: leave it. Mention skipped findings once in the summary.
 
-5. **Re-run** from step 1 after the fixes until the review approves or every remaining finding is
-   skipped, then continue the workflow (`/opsx:verify`).
+5. **Re-run** from step 1 after the fixes until the review approves (verdict `approve`) or every
+   remaining finding is skipped, then continue the workflow (`/opsx:verify`).
 
 ## Notes
 

@@ -142,3 +142,22 @@ func TestCollectBadBase(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+// A textconv driver can hide changes from `git diff`; the review must see the
+// raw change, so a converter that drops the edited line must not matter.
+func TestCollectIgnoresTextconv(t *testing.T) {
+	dir := gitRepo(t)
+	write(t, dir, ".gitattributes", "*.cfg diff=hide\n")
+	write(t, dir, "app.cfg", "keep\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "cfg")
+	git(t, dir, "config", "diff.hide.textconv", "grep -v SECRET_CHANGE")
+	write(t, dir, "app.cfg", "keep\nSECRET_CHANGE\n")
+	s, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatalf("change hidden by textconv: %v", err)
+	}
+	if !strings.Contains(s.Diff, "+SECRET_CHANGE") {
+		t.Fatalf("diff lacks the raw change:\n%s", s.Diff)
+	}
+}

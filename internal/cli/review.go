@@ -111,7 +111,7 @@ func runRoot(dir string) (string, error) {
 }
 
 // forwardedEnv lists the caller variables the companion command carries.
-var forwardedEnv = []string{"PATH", "CODEX_HOME"}
+var forwardedEnv = []string{"PATH", "CODEX_HOME", "AGTERMCTL"}
 
 // CompanionName is the sidebar name of the review companion, suffixed " #N".
 const CompanionName = "codex-review"
@@ -156,8 +156,8 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 			return e.errorf("%v", err)
 		}
 		// Forward the caller's PATH (so codex and agtermctl resolve even when
-		// agterm runs the command without a login shell) and CODEX_HOME (codex
-		// config and auth). Never secrets: the command line is visible in ps.
+		// agterm runs the command without a login shell), CODEX_HOME (codex
+		// config and auth) and AGTERMCTL (the same agtermctl as the caller). Never secrets: the command line is visible in ps.
 		var envArgs []string
 		for _, k := range forwardedEnv {
 			if v := e.Getenv(k); v != "" {

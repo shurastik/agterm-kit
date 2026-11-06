@@ -113,7 +113,7 @@ func ReviewerTools() []string {
 
 func (c *Claude) Review(ctx context.Context, t Turn, term io.Writer) (string, error) {
 	args := append(append([]string{}, printFlags...),
-		"--json-schema", string(assets.ReviewSchema),
+		"--json-schema", claudeReviewSchema(),
 		"--permission-mode", "dontAsk", "--allowedTools", strings.Join(ReviewerTools(), ","))
 	args = append(args, claudeTuning(t.Worker)...)
 	args = append(args, sessionArgs(&t)...)
@@ -130,6 +130,21 @@ func (c *Claude) Review(ctx context.Context, t Turn, term io.Writer) (string, er
 		return t.Session, err
 	}
 	return t.Session, fsx.ReplaceFile(filepath.Join(t.Dir, OutputFile), append(b, '\n'), 0o644)
+}
+
+// claudeReviewSchema is the review schema without "$schema": claude's
+// validator does not know the 2020-12 meta-schema and rejects the flag.
+func claudeReviewSchema() string {
+	var m map[string]any
+	if err := json.Unmarshal(assets.ReviewSchema, &m); err != nil {
+		panic("embedded review schema: " + err.Error())
+	}
+	delete(m, "$schema")
+	b, err := json.Marshal(m)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // renderClaude turns a claude stream-json event into display lines.
@@ -154,7 +169,7 @@ func renderClaude(ev event) []string {
 					out = append(out, "$ "+str(part, "input", "command"))
 				default:
 					line := name
-					for _, k := range []string{"file_path", "path", "pattern", "url"} {
+					for _, k := range []string{"file_path", "pattern", "path", "url"} {
 						if v := str(part, "input", k); v != "" {
 							line += " " + v
 							break

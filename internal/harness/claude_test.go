@@ -45,7 +45,7 @@ func TestClaudeReviewFirstRound(t *testing.T) {
 		t.Fatalf("session %q, %v", sess, err)
 	}
 	want := []string{"-p", "--output-format", "stream-json", "--verbose",
-		"--json-schema", string(assets.ReviewSchema),
+		"--json-schema", claudeSchema(t),
 		"--permission-mode", "dontAsk", "--allowedTools", reviewerTools(),
 		"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "/x",
 		"--session-id", "S-1"}
@@ -186,4 +186,20 @@ func TestNewDriver(t *testing.T) {
 	if id := NewSessionID(); len(id) != 36 || id[14] != '4' || id == NewSessionID() {
 		t.Errorf("session id %q", id)
 	}
+}
+
+// claudeSchema is the review schema without "$schema": claude's validator does
+// not know the 2020-12 meta-schema and rejects the whole flag.
+func claudeSchema(t *testing.T) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(assets.ReviewSchema, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["$schema"]; !ok {
+		t.Fatal("the embedded schema declares $schema; this test guards stripping it")
+	}
+	delete(m, "$schema")
+	b, _ := json.Marshal(m)
+	return string(b)
 }

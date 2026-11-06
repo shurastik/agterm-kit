@@ -45,7 +45,7 @@
 
 ## 8. Integration checks
 
-- [ ] 8.1 Run a live smoke test in agterm in a scratch git repo with a tiny OpenSpec change. Check:
+- [x] 8.1 Run a live smoke test in agterm in a scratch git repo with a tiny OpenSpec change. Check:
   - the claude applier: start (handshake `true` in a trusted folder, `false` with screen lines in an untrusted one), wait `done`, send a note, wait for round 2, close;
   - the codex reviewer: start, then send round 2, which resumes the same thread, then close;
   - the codex applier and the claude reviewer: one round each.

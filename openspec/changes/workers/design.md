@@ -261,7 +261,9 @@ reserved. The skill drops its triage section.
   `close` closed the companion.
   - The reviewer had loaded the `agk-review` skill on its own, so the review prompt now forbids
     running `agk`.
-- **Claude reviewer.** See task 8.1.
+- **Claude reviewer.** The first run failed because claude rejects `--json-schema` when the schema
+  declares `$schema` draft 2020-12. The driver now strips `$schema`. After the fix, round 1 approved
+  and `close` closed the companion.
 
 ## Open Questions
 

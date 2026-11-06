@@ -16,8 +16,8 @@
 
 ## 4. Skill and docs
 
-- [ ] 4.1 Rewrite `skill/agterm-codex-review/SKILL.md` per design D6 (wait step with one branch per `status`, inline runs also via `wait`, triage optional and only on the user's request, default act-on-findings flow); verify by reading the rendered file and checking that every `status` value and every remaining `agk` exit code is covered
-- [ ] 4.2 Update the `AGENTS.md` usage block (replace the raw `agtermctl session wait` lines with `agk review wait <dir>`); verify the documented commands match `agk --help`
+- [x] 4.1 Rewrite `skill/agterm-codex-review/SKILL.md` per design D6 (wait step with one branch per `status`, inline runs also via `wait`, triage optional and only on the user's request, default act-on-findings flow); verify by reading the rendered file and checking that every `status` value and every remaining `agk` exit code is covered
+- [x] 4.2 Update the `AGENTS.md` usage block (replace the raw `agtermctl session wait` lines with `agk review wait <dir>`); verify the documented commands match `agk --help`
 
 ## 5. Integration
 

@@ -23,9 +23,9 @@ go mod tidy                      # Sync deps
 
 ```bash
 agk review start [--base main]   # spawn the "codex-review #N" companion; prints {"companion","dir"}
-A="${AGTERMCTL:-/Applications/agterm.app/Contents/MacOS/agtermctl}"; [ -x "$A" ] || A=agtermctl
-"$A" session wait --socket "$AGTERM_SOCKET" --target <companion> --until completed --until blocked --timeout 1800
-agk triage <dir>/review.json     # overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
+agk review wait <dir>            # prints {"status":"completed|blocked|cancelled|running",...};
+                                 # closes the companion after a completed review
+agk triage <dir>/review.json     # optional overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
 ```
 
 The agent-facing workflow lives in `skill/agterm-codex-review/SKILL.md`, installed with

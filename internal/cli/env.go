@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
+	"github.com/shurastik/agterm-kit/internal/apply"
 	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/setup"
@@ -26,14 +27,19 @@ const (
 // Env carries every side effect a command may have.
 type Env struct {
 	Stdout, Stderr io.Writer
+	Stdin          io.Reader
 	Getenv         func(string) string
 	Ctl            agterm.Ctl
 	Driver         func(name string) (harness.Driver, error)
 	Collect        func(ctx context.Context, dir, base string) (review.Scope, error)
 	RepoRoot       func(ctx context.Context, dir string) (string, error)
-	Now            func() time.Time
-	Executable     func() (string, error)
-	Cwd            string
+	// ApplyState reports an OpenSpec change's apply state (ready, blocked,
+	// all_done) and the CLI's message.
+	ApplyState   func(ctx context.Context, root, change string) (state, message string, err error)
+	NewSessionID func() string
+	Now          func() time.Time
+	Executable   func() (string, error)
+	Cwd          string
 
 	// Machine wiring for agk setup.
 	Home      string
@@ -53,22 +59,25 @@ func NewEnv() (*Env, error) {
 		return nil, err
 	}
 	return &Env{
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		Getenv:     os.Getenv,
-		Ctl:        agterm.NewCLI(),
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Stdin:  os.Stdin,
+		Getenv: os.Getenv,
+		Ctl:    agterm.NewCLI(),
 		Driver: func(name string) (harness.Driver, error) {
 			return harness.New(name, harness.DefaultRuntime())
 		},
-		Collect:    review.Collect,
-		RepoRoot:   review.RepoRoot,
-		Now:        time.Now,
-		Executable: os.Executable,
-		Cwd:        cwd,
-		Home:       home,
-		LookPath:   exec.LookPath,
-		GitConfig:  setup.GlobalGitConfig,
-		IsExec:     isExecutable,
+		Collect:      review.Collect,
+		RepoRoot:     review.RepoRoot,
+		ApplyState:   apply.OpenSpecState,
+		NewSessionID: harness.NewSessionID,
+		Now:          time.Now,
+		Executable:   os.Executable,
+		Cwd:          cwd,
+		Home:         home,
+		LookPath:     exec.LookPath,
+		GitConfig:    setup.GlobalGitConfig,
+		IsExec:       isExecutable,
 	}, nil
 }
 

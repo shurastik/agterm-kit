@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,31 +87,36 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 	statusRetryDelay = 0
 	t.Cleanup(func() { statusRetryDelay = old })
 	h := &tenv{
-		ctl:    &agtermtest.Fake{CompanionID: "COMP-1"},
+		ctl:     &agtermtest.Fake{CompanionID: "COMP-1"},
 		drivers: map[string]*fakeDriver{"codex": {name: "codex"}, "claude": {name: "claude"}},
-		out:    &bytes.Buffer{},
-		err:    &bytes.Buffer{},
-		vars:   map[string]string{},
+		out:     &bytes.Buffer{},
+		err:     &bytes.Buffer{},
+		vars:    map[string]string{},
 	}
 	if inAgterm {
 		h.vars["AGTERM_ENABLED"] = "1"
 		h.vars["AGTERM_SESSION_ID"] = "SELF"
 	}
 	h.env = &Env{
-		Stdout:     h.out,
-		Stderr:     h.err,
-		Getenv:     func(k string) string { return h.vars[k] },
-		Ctl:        h.ctl,
+		Stdout: h.out,
+		Stderr: h.err,
+		Getenv: func(k string) string { return h.vars[k] },
+		Ctl:    h.ctl,
 		Driver: func(name string) (harness.Driver, error) {
 			if d, ok := h.drivers[name]; ok {
 				return d, nil
 			}
 			return nil, errors.New("no driver " + name)
 		},
-		Now:        func() time.Time { return time.Date(2026, 11, 5, 10, 0, 0, 0, time.Local) },
-		Executable: func() (string, error) { return "/usr/local/bin/agk", nil },
-		Cwd:        t.TempDir(),
-		Home:       t.TempDir(),
+		Now:          func() time.Time { return time.Date(2026, 11, 5, 10, 0, 0, 0, time.Local) },
+		Executable:   func() (string, error) { return "/usr/local/bin/agk", nil },
+		Cwd:          t.TempDir(),
+		Home:         t.TempDir(),
+		Stdin:        strings.NewReader(""),
+		NewSessionID: func() string { return "SESS-NEW" },
+		ApplyState: func(context.Context, string, string) (string, string, error) {
+			return "ready", "", nil
+		},
 		RepoRoot: func(context.Context, string) (string, error) {
 			return "", errors.New("not a git repository")
 		},

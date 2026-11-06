@@ -20,6 +20,17 @@ Usage:
                                   Start the next round: re-review the current diff in the same
                                   reviewer session; prints {"companion","dir","round"}.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
+  agk apply start <change> [--applier H[:M]]
+                                  Start the applier for an OpenSpec change in a <harness>-apply
+                                  companion (interactive, autonomous); prints
+                                  {"companion","dir","started"}. Outside agterm it runs headless.
+  agk apply wait <run-dir> [--timeout SECONDS]
+                                  Wait for the current round (default 3600 s); prints
+                                  {"status":"done|blocked|needs-human|cancelled|running","round":K,...}.
+  agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]
+                                  Start the next round with findings or notes once the applier's
+                                  turn is over (default 600 s); prints {"round":K}.
+  agk apply close <run-dir>       Close the applier companion (undo restores it).
   agk triage <review.json>        Triage findings in an agterm overlay; prints decisions JSON.
   agk config [--applier H[:M]] [--reviewer H[:M]]
                                   Print the resolved worker configuration (harness, model, effort,
@@ -54,6 +65,8 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return ExitOK
 	case "review":
 		return e.reviewCmd(ctx, args[1:])
+	case "apply":
+		return e.applyCmd(ctx, args[1:])
 	case "triage":
 		return e.Triage(ctx, args[1:])
 	case "config":

@@ -63,3 +63,25 @@ func TestGlobalGitConfigExplicitlyEmpty(t *testing.T) {
 		t.Fatal("unset key reported as set")
 	}
 }
+
+func TestGlobalGitConfigHonoursNoSystem(t *testing.T) {
+	dir := realTemp(t)
+	global := filepath.Join(dir, "global")
+	system := filepath.Join(dir, "system")
+	os.WriteFile(global, nil, 0o644)
+	os.WriteFile(system, []byte("[core]\n\texcludesFile = /etc/gitignore\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_SYSTEM", system)
+	for _, v := range []string{"1", "true", "YES", "on"} {
+		t.Setenv("GIT_CONFIG_NOSYSTEM", v)
+		if got, set, err := GlobalGitConfig("core.excludesFile"); err != nil || set {
+			t.Errorf("NOSYSTEM=%s: got %q set %v, %v; want unset", v, got, set, err)
+		}
+	}
+	for _, v := range []string{"0", "false", "no", "off", ""} {
+		t.Setenv("GIT_CONFIG_NOSYSTEM", v)
+		if got, _, err := GlobalGitConfig("core.excludesFile"); err != nil || got != "/etc/gitignore" {
+			t.Errorf("NOSYSTEM=%q: got %q, %v; want system value", v, got, err)
+		}
+	}
+}

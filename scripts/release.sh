@@ -31,17 +31,17 @@ check_tap() {
   [[ "$(git -C "$tap_dir" branch --show-current)" == "$tap_branch" ]] || die "tap checkout is not on $tap_branch"
   git -C "$tap_dir" remote get-url origin >/dev/null 2>&1 || die "tap checkout has no origin remote"
   local dirty
-  dirty="$(git -C "$tap_dir" status --porcelain)"
+  dirty="$(git -C "$tap_dir" status --porcelain --untracked-files=all)"
   # A rerun after a failed tap commit finds its own formula left behind. Drop it only when both the
   # working copy and the index hold exactly what this script renders for this version (or HEAD's
   # copy); anything else is a hand edit and stops the release.
-  if [[ -n "$dirty" && -n "$tag_exists" && "$dirty" == "$(git -C "$tap_dir" status --porcelain -- Formula/agk.rb)" ]] &&
+  if [[ -n "$dirty" && -n "$tag_exists" && "$dirty" == "$(git -C "$tap_dir" status --porcelain --untracked-files=all -- Formula/agk.rb)" ]] &&
     own_formula <(cat "$tap_dir/Formula/agk.rb" 2>/dev/null) &&
     own_formula <(git -C "$tap_dir" show :Formula/agk.rb 2>/dev/null); then
     echo "release: discarding the unfinished Formula/agk.rb of a previous run" >&2
     git -C "$tap_dir" reset --quiet -- Formula/agk.rb
     git -C "$tap_dir" checkout --quiet -- Formula/agk.rb 2>/dev/null || rm -f "$tap_dir/Formula/agk.rb"
-    dirty="$(git -C "$tap_dir" status --porcelain)"
+    dirty="$(git -C "$tap_dir" status --porcelain --untracked-files=all)"
   fi
   [[ -z "$dirty" ]] || die "tap checkout has local changes"
 }
@@ -58,7 +58,7 @@ own_formula() {
 tag_exists=""
 if [[ -z "$dry_run" ]]; then
   [[ "$(git branch --show-current)" == "main" ]] || die "not on main"
-  [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] || die "working tree is not clean"
   git fetch --quiet origin main --tags
   [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "main is not in sync with origin/main"
   if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -105,7 +105,7 @@ fi
 
 mkdir -p "$tap_dir/Formula"
 cp "$formula" "$tap_dir/Formula/agk.rb"
-if [[ -z "$(git -C "$tap_dir" status --porcelain)" ]]; then
+if [[ -z "$(git -C "$tap_dir" status --porcelain --untracked-files=all)" ]]; then
   echo "release: tap already has agk $version"
 else
   git -C "$tap_dir" add Formula/agk.rb

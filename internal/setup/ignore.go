@@ -34,6 +34,10 @@ func planIgnore(c Config) ([]Action, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !filepath.IsAbs(p) {
+		// git resolves it per repository; editing it here would touch the current project.
+		return []Action{{Kind: KindConflict, Path: p, Detail: "core.excludesFile is relative; set an absolute path"}}, nil
+	}
 	data, err := os.ReadFile(p)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
@@ -48,12 +52,13 @@ func planIgnore(c Config) ([]Action, error) {
 // line that is either a literal .agk rule or any negation must be a positive
 // .agk rule. Any later "!" pattern might re-include .agk/ (git's last matching
 // rule wins), so it counts against; appending .agk/ then makes it last again.
-// Only trailing whitespace is insignificant in gitignore.
+// Only trailing spaces (and a CRLF line ending, as git reads it) are insignificant
+// in gitignore; a trailing tab stays part of the pattern.
 func ignoresAgk(data []byte) bool {
 	ignored := false
 	s := bufio.NewScanner(bytes.NewReader(data))
 	for s.Scan() {
-		line := strings.TrimRight(s.Text(), " \t\r")
+		line := strings.TrimRight(s.Text(), " ")
 		switch {
 		case strings.HasPrefix(line, "!"):
 			ignored = false

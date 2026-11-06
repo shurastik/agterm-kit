@@ -48,9 +48,11 @@ single Go binary with no cgo, building from source costs Homebrew a few seconds 
 `packaging/homebrew/agk.rb.tmpl` (version, URL and sha256 placeholders) is versioned with the code
 it builds, so a layout change (say, a new `share/` subdirectory) lands in the same commit as the
 code. `scripts/release.sh VERSION` checks it is on a clean `main` in sync with origin, runs
-`go test ./...` and `go vet ./...`, tags `vVERSION`, pushes the tag, downloads the tag tarball,
+`go test ./...` and `go vet ./...`, checks the tap checkout (on `main`, clean, fast-forwarded
+from `origin main`) before anything is published, tags `vVERSION` (reusing an existing tag only if
+it is on `HEAD`, so a failed run can be repeated), pushes the tag, downloads the tag tarball,
 computes its sha256, renders the template into the tap checkout (`$AGK_TAP_DIR`, default
-`~/Projects/homebrew-tap`) as `Formula/agk.rb`, commits and pushes the tap.
+`~/Projects/homebrew-tap`) as `Formula/agk.rb`, commits and pushes the tap to `origin main` explicitly.
 
 Alternative: hand-editing the formula in the tap each release; easy to forget the sha or the
 skills install line.
@@ -78,7 +80,8 @@ the Cellar, so it is not reliable).
 
 ### D5. `internal/setup`: plan, then apply
 
-`setup.Plan(cfg) ([]Action, error)` inspects the filesystem with `Lstat`/`Readlink` and returns
+`setup.Plan(cfg) ([]Action, error)` refuses a skills directory without `agk-*` skills (it
+would plan every installed link as stale), then inspects the filesystem with `Lstat`/`Readlink` and returns
 actions with a kind (`ok`, `create`, `repoint`, `remove`, `conflict`, `skip`, `append`,
 `missing`, `found`). `setup.Apply(actions)` performs the mutating ones. `--dry-run` prints the
 plan and stops. `cfg` carries the home directory, `getenv`, a `lookPath` and a `gitConfig` func,
@@ -105,7 +108,8 @@ Path: `git config --global --includes --path core.excludesFile` (via the injecte
 a literal `.agk`, `.agk/`, `/.agk` or `/.agk/` rule (trailing, not leading, whitespace trimmed as
 gitignore does) comes after every `!` rule in the file: git's last matching rule wins, and any
 negation (`!**/.agk/`, `!*`) might re-include it. Otherwise `.agk/` is appended, which makes it
-last again. Positive globs that might already match are not evaluated; missing one only costs a
+last again. A relative `core.excludesFile` is a `conflict`: git resolves it per repository, so
+appending would edit the current project's file. Positive globs that might already match are not evaluated; missing one only costs a
 redundant line. To append: resolve symlinks
 with `filepath.EvalSymlinks`, read the target, add a newline first if the file does not end with
 one, add `.agk/`, write with `fsx.ReplaceFile` keeping the file mode. A missing file is created

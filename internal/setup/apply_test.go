@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,7 +114,7 @@ func TestApplyLeavesConflictsAndContinues(t *testing.T) {
 func TestApplyIgnoreHonouredByGit(t *testing.T) {
 	for _, before := range []string{
 		"", "  .agk/\n", ".agk/\n!.agk/\n", "**/.claude/settings.local.json",
-		".agk/\n!**/.agk/\n", ".agk/\n!*\n",
+		".agk/\n!**/.agk/\n", ".agk/\n!*\n", ".agk/\t\n",
 	} {
 		e := newLinkEnv(t)
 		excludes := filepath.Join(e.home, "gitignore")
@@ -130,5 +131,19 @@ func TestApplyIgnoreHonouredByGit(t *testing.T) {
 			data, _ := os.ReadFile(excludes)
 			t.Errorf("before %q: .agk/ not ignored by git (%v); file now %q", before, err, data)
 		}
+	}
+}
+
+func TestPlanRejectsSkillsDirWithoutSkills(t *testing.T) {
+	e := newLinkEnv(t)
+	installed := filepath.Join(e.home, ".claude", "skills", "agk-review")
+	symlink(t, filepath.Join(e.skills, "agk-review"), installed)
+	c := fullCfg(e)
+	c.SkillsDir = mkdir(t, e.home, "checkout") // e.g. --skills-dir . from a repo root
+	if _, err := Plan(c); err == nil || !strings.Contains(err.Error(), "no agk-* skills") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Readlink(installed); err != nil {
+		t.Fatalf("installed link touched: %v", err)
 	}
 }

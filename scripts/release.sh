@@ -11,6 +11,7 @@ set -euo pipefail
 
 repo="shurastik/agterm-kit"
 tap_dir="${AGK_TAP_DIR:-$HOME/Projects/homebrew-tap}"
+tap_branch="main" # the branch `brew update` reads
 dry_run="${DRY_RUN:-}"
 
 die() { echo "release: $*" >&2; exit 1; }
@@ -27,6 +28,8 @@ template="packaging/homebrew/agk.rb.tmpl"
 # Everything that can fail locally is checked before the tag is published.
 check_tap() {
   [[ -d "$tap_dir/.git" ]] || die "tap checkout not found at $tap_dir (set AGK_TAP_DIR)"
+  [[ "$(git -C "$tap_dir" branch --show-current)" == "$tap_branch" ]] || die "tap checkout is not on $tap_branch"
+  git -C "$tap_dir" remote get-url origin >/dev/null 2>&1 || die "tap checkout has no origin remote"
   [[ -z "$(git -C "$tap_dir" status --porcelain)" ]] || die "tap checkout has local changes"
 }
 
@@ -42,7 +45,7 @@ if [[ -z "$dry_run" ]]; then
     tag_exists=1
   fi
   check_tap
-  git -C "$tap_dir" pull --quiet --ff-only || die "cannot fast-forward the tap checkout"
+  git -C "$tap_dir" pull --quiet --ff-only origin "$tap_branch" || die "cannot fast-forward the tap checkout"
 fi
 
 go vet ./...
@@ -86,7 +89,7 @@ else
   git -C "$tap_dir" add Formula/agk.rb
   git -C "$tap_dir" commit --quiet -m "agk $version"
 fi
-git -C "$tap_dir" push --quiet
+git -C "$tap_dir" push --quiet origin "HEAD:refs/heads/$tap_branch"
 
 echo "release: agk $version tagged and published to the tap"
 echo "release: brew update && brew upgrade agk && agk setup"

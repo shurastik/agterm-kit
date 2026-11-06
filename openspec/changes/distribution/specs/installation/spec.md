@@ -45,7 +45,8 @@ build agk with its release version stamped, run `agk version` as its test, and t
 `agk setup` SHALL take the skills directory from `--skills-dir`, else `$AGK_SKILLS_DIR`, else the
 Homebrew `opt/agk/share/agk/skills` path when agk runs from a Homebrew Cellar, else
 `share/agk/skills` beside the binary's parent directory. It SHALL fail with a message naming
-`--skills-dir` when none exists.
+`--skills-dir` when none exists, and SHALL fail without changing anything when the chosen directory holds no `agk-*`
+skill.
 
 #### Scenario: Homebrew install links through the stable opt path
 - **GIVEN** agk runs from `/opt/homebrew/Cellar/agk/0.3.0/bin/agk`
@@ -55,6 +56,11 @@ Homebrew `opt/agk/share/agk/skills` path when agk runs from a Homebrew Cellar, e
 #### Scenario: Development checkout
 - **WHEN** the user runs `agk setup --skills-dir ~/Projects/agterm-kit/skills`
 - **THEN** the skill links point into that checkout's `skills/` directory
+
+#### Scenario: Skills directory without skills
+- **GIVEN** agk skill links are installed and `--skills-dir` names a directory with no `agk-*` skill
+- **WHEN** the user runs `agk setup --skills-dir <that directory>`
+- **THEN** it exits 1 naming the directory, and the installed links are unchanged
 
 #### Scenario: No skills directory found
 - **GIVEN** agk was installed with `go install` and neither `--skills-dir` nor `$AGK_SKILLS_DIR` is set
@@ -161,6 +167,11 @@ any file or link.
 ### Requirement: Machine-level only
 `agk setup` SHALL NOT create or modify anything inside the current working directory or any
 repository, except a global excludes file that happens to live in one.
+
+#### Scenario: Relative excludes file
+- **GIVEN** the global git config sets `core.excludesFile = .gitignore`
+- **WHEN** the user runs `agk setup` inside a repository
+- **THEN** the repository's `.gitignore` is unchanged, the output reports a conflict asking for an absolute path, the skill links are still set up, and the exit status is 1
 
 #### Scenario: Run inside a project
 - **GIVEN** the current directory is a git repository

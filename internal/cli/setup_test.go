@@ -189,3 +189,21 @@ func TestSetupArgs(t *testing.T) {
 		t.Errorf("extra arg exit %d", code)
 	}
 }
+
+func TestSetupRelativeExcludesFileLeavesProjectAlone(t *testing.T) {
+	s := newSetupHarness(t)
+	s.env.GitConfig = func(string) (string, error) { return ".gitignore", nil }
+	if code := s.run(); code != ExitError {
+		t.Fatalf("exit %d", code)
+	}
+	entries, _ := os.ReadDir(s.env.Cwd)
+	if len(entries) != 0 {
+		t.Fatalf("cwd has %v", entries)
+	}
+	if _, err := os.Readlink(s.link(".claude")); err != nil {
+		t.Errorf("links not created: %v", err)
+	}
+	if !strings.Contains(s.out.String(), "conflict") {
+		t.Errorf("output:\n%s", s.out)
+	}
+}

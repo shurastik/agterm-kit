@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,7 +60,7 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 	for _, content := range []string{
 		".agk\n", ".agk/\n", "/.agk\n", "/.agk/\n", ".agk/  \n", ".agk/\r\n", "**/.claude/x\n.agk/",
 		".agk/\n!.agk/\n.agk/\n", // last matching rule wins
-		"!keep.txt\n.agk/\n",       // negations before it do not matter
+		"!keep.txt\n.agk/\n",     // negations before it do not matter
 	} {
 		os.WriteFile(p, []byte(content), 0o644)
 		acts, err := planIgnore(ignoreCfg(home, map[string]string{}, p))
@@ -69,8 +70,9 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 	}
 	for _, content := range []string{
 		"", "**/.claude/settings.local.json\n", ".agkx/\n", "# .agk/\n", "sub/.agk/\n",
-		"  .agk/\n",         // leading spaces are part of the pattern
-		".agk/\n!.agk/\n",   // re-included by a later rule
+		"  .agk/\n",       // leading spaces are part of the pattern
+		".agk/\t\n",       // so is a trailing tab
+		".agk/\n!.agk/\n", // re-included by a later rule
 		".agk/\n!/.agk\n",
 		".agk/\n!**/.agk/\n", // any later negation may re-include it
 		".agk/\n!*\n",
@@ -80,5 +82,16 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 		if len(acts) != 1 || acts[0].Kind != KindAppend {
 			t.Errorf("%q: %+v; want append", content, acts)
 		}
+	}
+}
+
+func TestIgnoreRelativeExcludesFileIsConflict(t *testing.T) {
+	home := realTemp(t)
+	acts, err := planIgnore(ignoreCfg(home, map[string]string{}, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 || acts[0].Kind != KindConflict || !strings.Contains(acts[0].Detail, "absolute") {
+		t.Fatalf("%+v, want conflict asking for an absolute path", acts)
 	}
 }

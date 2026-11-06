@@ -2,6 +2,7 @@ package setup
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -99,6 +100,10 @@ func planLinks(c Config) ([]Action, error) {
 	names, err := c.skills()
 	if err != nil {
 		return nil, err
+	}
+	if len(names) == 0 {
+		// Planning against it would remove every installed agk-* link as stale.
+		return nil, fmt.Errorf("no agk-* skills in %s", c.SkillsDir)
 	}
 	shipped := map[string]bool{}
 	for _, n := range names {

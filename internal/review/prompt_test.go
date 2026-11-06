@@ -3,6 +3,7 @@ package review
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func sampleScope() Scope {
@@ -65,5 +66,23 @@ func TestPromptTruncatesLargeDiff(t *testing.T) {
 		if strings.HasPrefix(l, "+y") && len(l) != len(line)-1 {
 			t.Fatal("diff must be cut on a line boundary")
 		}
+	}
+}
+
+// codex rejects a prompt that is not valid UTF-8, so one legacy-encoded file
+// must not sink the whole review.
+func TestPromptIsValidUTF8(t *testing.T) {
+	s := sampleScope()
+	s.Diff = "diff --git a/w.txt b/w.txt\n+\xcf\xf0\xe8\xe2\xe5\xf2\n" // "Привет" in cp1251
+	s.Untracked = []UntrackedFile{{Path: "ok.go", Content: "package x\n"}}
+	p, err := Prompt(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(p) {
+		t.Fatal("prompt is not valid UTF-8")
+	}
+	if !strings.Contains(p, `+\xcf\xf0\xe8\xe2\xe5\xf2`) {
+		t.Fatal("invalid bytes should stay visible as \\xNN escapes")
 	}
 }

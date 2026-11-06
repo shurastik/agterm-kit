@@ -1,8 +1,10 @@
 package review
 
 import (
+	"fmt"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"github.com/shurastik/agterm-kit/assets"
 )
@@ -41,7 +43,27 @@ func Prompt(s Scope) (string, error) {
 	if err := promptTmpl.Execute(&b, d); err != nil {
 		return "", err
 	}
-	return b.String(), nil
+	return escapeInvalidUTF8(b.String()), nil
+}
+
+// escapeInvalidUTF8 shows bytes that are not valid UTF-8 as \xNN: codex
+// refuses a prompt that is not valid UTF-8, and a diff of a legacy-encoded
+// file would otherwise sink the whole review.
+func escapeInvalidUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			fmt.Fprintf(&b, `\x%02x`, s[0])
+		} else {
+			b.WriteString(s[:size])
+		}
+		s = s[size:]
+	}
+	return b.String()
 }
 
 // cutLines returns the longest prefix of s within max bytes ending on a line break.

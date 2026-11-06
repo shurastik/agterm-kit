@@ -181,3 +181,15 @@ func TestCollectSeesSubmoduleUpdateDespiteIgnoreConfig(t *testing.T) {
 		t.Fatalf("diff/stat lack the gitlink change:\n%s\n%s", s.Diff, s.Stat)
 	}
 }
+
+func TestCollectOmitsNonUTF8Untracked(t *testing.T) {
+	dir := gitRepo(t)
+	write(t, dir, "legacy.txt", "\xcf\xf0\xe8\xe2\xe5\xf2\n") // cp1251, no NUL
+	s, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Untracked) != 1 || s.Untracked[0].Content != "" || !strings.Contains(s.Untracked[0].Omitted, "UTF-8") {
+		t.Fatalf("untracked = %+v", s.Untracked)
+	}
+}

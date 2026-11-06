@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ErrNothingToReview means the review scope is empty.
@@ -131,6 +132,10 @@ func readUntracked(root, rel string) UntrackedFile {
 	}
 	if bytes.IndexByte(head, 0) >= 0 {
 		u.Omitted = "binary"
+		return u
+	}
+	if !utf8.Valid(b) {
+		u.Omitted = "not valid UTF-8 (legacy encoding?), read it directly"
 		return u
 	}
 	u.Content = string(b)

@@ -11,7 +11,7 @@ import (
 )
 
 // repoWith makes a repo root, points RepoRoot at it and writes .agk.toml.
-func repoWith(t *testing.T, h *harness, agkToml string) string {
+func repoWith(t *testing.T, h *tenv, agkToml string) string {
 	t.Helper()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	h.env.RepoRoot = func(context.Context, string) (string, error) { return root, nil }
@@ -32,7 +32,7 @@ type shownRole struct {
 	Sources        map[string]string `json:"sources"`
 }
 
-func showConfig(t *testing.T, h *harness, args ...string) map[string]shownRole {
+func showConfig(t *testing.T, h *tenv, args ...string) map[string]shownRole {
 	t.Helper()
 	if code := h.env.Config(context.Background(), args); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)

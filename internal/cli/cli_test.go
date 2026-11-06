@@ -34,7 +34,7 @@ func (f *fakeRunner) Run(_ context.Context, root, dir, prompt string, term io.Wr
 	return f.err
 }
 
-type harness struct {
+type tenv struct {
 	env      *Env
 	ctl      *agtermtest.Fake
 	runner   *fakeRunner
@@ -42,12 +42,12 @@ type harness struct {
 	vars     map[string]string
 }
 
-func newHarness(t *testing.T, inAgterm bool) *harness {
+func newHarness(t *testing.T, inAgterm bool) *tenv {
 	t.Helper()
 	old := statusRetryDelay
 	statusRetryDelay = 0
 	t.Cleanup(func() { statusRetryDelay = old })
-	h := &harness{
+	h := &tenv{
 		ctl:    &agtermtest.Fake{CompanionID: "COMP-1"},
 		runner: &fakeRunner{},
 		out:    &bytes.Buffer{},

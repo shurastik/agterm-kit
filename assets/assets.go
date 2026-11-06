@@ -13,3 +13,9 @@ var ReviewSchema []byte
 //
 //go:embed review-prompt.md
 var ReviewPrompt string
+
+// ReviewerTools is the allowlist of tools for a claude reviewer, one per line;
+// blank lines and # comments are ignored.
+//
+//go:embed reviewer-tools.txt
+var ReviewerTools string

@@ -40,7 +40,7 @@ func writeResultFile(t *testing.T, dir, result string) {
 	}
 }
 
-func runWait(h *harness, args ...string) int {
+func runWait(h *tenv, args ...string) int {
 	return h.env.Main(context.Background(), append([]string{"review", "wait"}, args...))
 }
 

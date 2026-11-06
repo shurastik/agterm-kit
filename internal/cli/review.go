@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shurastik/agterm-kit/internal/fsx"
+	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/rundir"
 )
@@ -121,7 +122,7 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	stamped := review.NewStampWriter(term, e.Now)
+	stamped := harness.NewStampWriter(term, e.Now)
 	fmt.Fprintf(stamped, "agk: review #%d started, run dir %s\n", num, dir)
 	rep.set(ctx, "active", review.ReviewingLine(num))
 	if err := e.Runner.Run(ctx, root, dir, string(prompt), term); err != nil {
@@ -146,7 +147,7 @@ func (e *Env) runReview(ctx context.Context, dir string, term io.Writer, rep rep
 		return fail(review.ReasonSetupFailed, err)
 	}
 	rep.set(ctx, "completed", review.SummaryLine(num, r))
-	fmt.Fprintf(review.NewStampWriter(term, e.Now), "agk: review #%d: %d finding(s), verdict %s -> %s\n",
+	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d: %d finding(s), verdict %s -> %s\n",
 		num, len(r.Findings), r.Verdict, filepath.Join(dir, "review.json"))
 	return ExitOK
 }

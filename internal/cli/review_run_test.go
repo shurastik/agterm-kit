@@ -125,12 +125,12 @@ func TestReviewRunOutsideAgterm(t *testing.T) {
 	}
 }
 
-func assertBlocked(t *testing.T, h *harness, reason string) {
+func assertBlocked(t *testing.T, h *tenv, reason string) {
 	t.Helper()
 	assertBlockedN(t, h, 1, reason)
 }
 
-func assertBlockedN(t *testing.T, h *harness, num int, reason string) {
+func assertBlockedN(t *testing.T, h *tenv, num int, reason string) {
 	t.Helper()
 	n := len(h.ctl.Calls)
 	if n < 2 {

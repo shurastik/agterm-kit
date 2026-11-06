@@ -14,7 +14,7 @@ import (
 	"github.com/shurastik/agterm-kit/internal/review"
 )
 
-func scriptScope(h *harness, root string) *[]string {
+func scriptScope(h *tenv, root string) *[]string {
 	var seen []string
 	h.env.Collect = func(_ context.Context, dir, base string) (review.Scope, error) {
 		seen = append(seen, dir, base)

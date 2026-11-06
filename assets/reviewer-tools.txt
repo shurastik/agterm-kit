@@ -1,0 +1,11 @@
+# Tools a claude reviewer may use: reading and searching files plus read-only git.
+# One entry per line, in Claude Code permission-rule syntax.
+Read
+Grep
+Glob
+Bash(git diff:*)
+Bash(git log:*)
+Bash(git show:*)
+Bash(git status:*)
+Bash(git blame:*)
+Bash(git ls-files:*)

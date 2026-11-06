@@ -12,7 +12,7 @@ import (
 // setupHarness is a harness whose home has ~/.claude and ~/.codex and whose
 // skills dir holds agk-review; every required tool is on the fake PATH.
 type setupHarness struct {
-	*harness
+	*tenv
 	home, skills string
 	path         map[string]bool
 }
@@ -24,7 +24,7 @@ func newSetupHarness(t *testing.T) *setupHarness {
 		t.Fatal(err)
 	}
 	s := &setupHarness{
-		harness: newHarness(t, false),
+		tenv:    newHarness(t, false),
 		home:    filepath.Join(root, "home"),
 		skills:  filepath.Join(root, "skills"),
 		path:    map[string]bool{"git": true, "codex": true, "claude": true, "openspec": true, "agtermctl": true},

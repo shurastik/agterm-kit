@@ -5,9 +5,16 @@ This file provides guidance to coding agents working in this repository.
 ## Overview
 
 agterm-kit (`agk`) is a Go CLI that wires coding-agent workflows into [agterm](https://agterm.app)
-companions and HTML overlays through `agtermctl`. First feature: run a codex review as a visible
-terminal companion under the Claude session, then triage its findings in an HTML overlay and hand
-the decisions back to the agent as JSON.
+companions through `agtermctl`. It runs two workers next to the main agent session, each in its own
+visible terminal companion:
+
+- the **applier** (`agk apply`): an interactive, autonomous claude or codex session that implements
+  an OpenSpec change and later fixes findings it is sent, reporting each round in a file;
+- the **reviewer** (`agk review`): a read-only codex or claude review of the diff with structured
+  findings, kept alive between rounds so re-reviews resume its session.
+
+Which harness and model each role uses comes from flags, `.agk.toml` and `~/.config/agk/config.toml`.
+Installed with Homebrew; `agk setup` links the agent skills that teach the main session the loop.
 
 ## Commands
 
@@ -34,49 +41,80 @@ tap checkout (`$AGK_TAP_DIR`, default `~/Projects/homebrew-tap`) and pushes it.
 ## Usage
 
 ```bash
-agk review start [--base main]   # spawn the "codex-review #N" companion; prints {"companion","dir"}
-agk review wait <dir>            # prints {"status":"completed|blocked|cancelled|running",...};
-                                 # closes the companion after a completed review
-agk triage <dir>/review.json     # optional overlay; prints decisions JSON (exit 2 dismissed, 3 no agterm)
+agk apply start <change> [--applier H[:M]]   # applier companion; prints {"companion","dir","started"}
+agk apply wait <dir>                         # {"status":"done|blocked|needs-human|cancelled|running","round":K,...}
+agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
+agk apply close <dir>
+agk review start [--base main] [--reviewer H[:M]]   # reviewer companion; prints {"companion","dir"}
+agk review wait <dir>                        # {"status":"completed|blocked|cancelled|running","round":K,...}
+agk review send <dir> [--note FILE]          # re-review round in the same reviewer session
+agk review close <dir>
+agk config                                   # resolved workers and the source of every value
 agk setup [--skills-dir DIR] [--dry-run]
 agk version
 ```
 
-The agent-facing workflow lives in `skills/agk-review/SKILL.md`.
+Worker configuration (`~/.config/agk/config.toml`, or `.agk.toml` in a repo root; flags win, then
+the repo file, then the user file, then the defaults: applier `claude`, reviewer `codex`):
+
+```toml
+[applier]
+harness = "claude"             # claude | codex
+model = "claude-sonnet-5-5"    # optional; the harness default otherwise
+effort = "high"                # optional
+permission_mode = "auto"       # claude applier only; default auto
+extra_args = ["--add-dir", "../shared"]
+
+[reviewer]
+harness = "codex"
+model = "gpt-5.5"
+```
+
+The agent-facing workflows live in `skills/agk-apply/SKILL.md` and `skills/agk-review/SKILL.md`.
 
 ## Layout
 
 | Path | Purpose |
 |------|---------|
 | `cmd/agk/` | CLI entry point and subcommands |
-| `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`) and a fake for tests |
-| `internal/review/` | Prompt from git diff, codex runner, review JSON parse/validate, run dir |
-| `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Runner, Collect, clock) |
+| `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`: companions, status, wait, type, text, mailbox) and a fake for tests |
+| `internal/config/` | Worker configuration: TOML layers, flags, resolution with per-key sources |
+| `internal/harness/` | `Driver` per harness (claude, codex): interactive applier argv, headless applier turn, structured review turn; event-stream rendering; `RunStreaming` |
+| `internal/rundir/` | `.agk/<kind>/<run>/` directories: numbering, rounds, `worker.json` |
+| `internal/apply/` | Applier prompts and rules, round report validation, wait decision, openspec state |
+| `internal/review/` | Review scope from git, prompts, review JSON parse/validate, status lines |
+| `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Driver, Collect, clock, ...) |
 | `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
 | `internal/setup/` | `agk setup`: skills dir resolution, link/ignore/dependency plan, apply |
 | `internal/buildinfo/` | `Version`, stamped with `-ldflags -X` at release |
-| `internal/triage/` | HTML triage page (`html/template` + embedded CSS/JS) and outcome parsing |
-| `assets/` | Embedded files (review output schema, review prompt template) |
+| `assets/` | Embedded files: review schema and prompts, applier prompts and rules, claude deny settings, reviewer tool list |
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
 | `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
 | `scripts/` | `release.sh`: tag a version and bump the tap formula |
 
-Run artifacts land in `.agk/reviews/<timestamp>/` of the reviewed repo (gitignored here).
+Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
+`rounds/<k>/` per round (gitignored here).
 
 ## Conventions
 
-- Every `agtermctl` and `codex` call goes through an interface (`agterm.Ctl`, `review.Runner`) so tests
-  assert exact argv against fakes; no test touches a real agterm or codex.
+- Every `agtermctl`, harness and `openspec` call goes through an interface or an injected func
+  (`agterm.Ctl`, `harness.Driver`, `Env.ApplyState`) so tests assert exact argv against fakes; no
+  test touches a real agterm, claude or codex.
 - `agtermctl` calls always pass `--target` (its default is the frontmost session, not the caller's)
   and `--socket $AGTERM_SOCKET` (agtermctl ignores the variable). The binary resolves like agterm's
   hooks: `$AGTERMCTL`, the app bundle, then PATH.
 - A companion's `$AGTERM_SESSION_ID` is its own id. `--command` runs in the user's login shell
-  (fish), so paths with `\` or newlines are refused rather than quoted.
-- The codex child runs without `AGTERM_*` variables so its own agterm status hooks cannot mark the
-  companion done before agk has validated the output.
-- Codex output is untrusted. Render it only through `html/template`, never put it into `data-agterm`
-  attributes, and keep the page CSP strict. The overlay bridge can run any socket command.
-- Outside agterm (`AGTERM_ENABLED` unset) commands degrade to plain terminal output with a distinct exit code.
+  (fish), so values with `\` or newlines are refused rather than quoted (paths, config values).
+- Worker state lives on disk (`worker.json`, `round`, `rounds/<k>/result.json` or `report.json`);
+  agterm status is only the wake-up signal. A run is pinned to the configuration it started with.
+- The reviewer child runs without `AGTERM_*` variables so its own agterm status hooks cannot mark the
+  companion done before agk has validated the output. The interactive applier keeps them: its hooks
+  are how agk learns that a turn ended.
+- Input reaches a live applier only as one typed line (`Read <prompt file> and follow it.` + Enter),
+  and only when its turn is over and no permission prompt is open.
+- Model output is untrusted: rendered through `termsafe` before it reaches a terminal, never put into
+  status markdown beyond fixed strings and counts.
+- Outside agterm (`AGTERM_ENABLED` unset) workers run inline in the foreground.
 
 ## Workflow
 

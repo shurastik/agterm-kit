@@ -39,9 +39,9 @@
 
 ## 7. Skills and docs
 
-- [ ] 7.1 Rewrite `skills/agk-review/SKILL.md`: start, wait, act, `send` for re-review, `close` when the loop is over, no triage, and how to choose the harness via config or flags. Verify that the front matter parses and every command in it matches `agk --help`
-- [ ] 7.2 Add `skills/agk-apply/SKILL.md`: start (and what to do on `started:false`), wait outcomes and the reaction to each, send findings or notes, close; never type into a working applier. Verify `agk setup --skills-dir ./skills --dry-run` plans links for both skills
-- [ ] 7.3 Update `AGENTS.md`: overview (workers, no triage), usage, layout (`internal/config`, `internal/harness`, `internal/rundir`, `internal/apply`; drop `internal/triage`), conventions (the applier keeps `AGTERM_*`, typed input is one line), and a config example. Verify that the documented commands match `agk --help`
+- [x] 7.1 Rewrite `skills/agk-review/SKILL.md`: start, wait, act, `send` for re-review, `close` when the loop is over, no triage, and how to choose the harness via config or flags. Verify that the front matter parses and every command in it matches `agk --help`
+- [x] 7.2 Add `skills/agk-apply/SKILL.md`: start (and what to do on `started:false`), wait outcomes and the reaction to each, send findings or notes, close; never type into a working applier. Verify `agk setup --skills-dir ./skills --dry-run` plans links for both skills
+- [x] 7.3 Update `AGENTS.md`: overview (workers, no triage), usage, layout (`internal/config`, `internal/harness`, `internal/rundir`, `internal/apply`; drop `internal/triage`), conventions (the applier keeps `AGTERM_*`, typed input is one line), and a config example. Verify that the documented commands match `agk --help`
 
 ## 8. Integration checks
 

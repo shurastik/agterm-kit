@@ -111,7 +111,10 @@ func TestApplyLeavesConflictsAndContinues(t *testing.T) {
 // TestApplyIgnoreHonouredByGit checks the result with git itself: whatever the
 // excludes file held before, .agk/ is ignored after setup.
 func TestApplyIgnoreHonouredByGit(t *testing.T) {
-	for _, before := range []string{"", "  .agk/\n", ".agk/\n!.agk/\n", "**/.claude/settings.local.json"} {
+	for _, before := range []string{
+		"", "  .agk/\n", ".agk/\n!.agk/\n", "**/.claude/settings.local.json",
+		".agk/\n!**/.agk/\n", ".agk/\n!*\n",
+	} {
 		e := newLinkEnv(t)
 		excludes := filepath.Join(e.home, "gitignore")
 		os.WriteFile(excludes, []byte(before), 0o644)

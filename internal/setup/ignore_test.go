@@ -59,6 +59,7 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 	for _, content := range []string{
 		".agk\n", ".agk/\n", "/.agk\n", "/.agk/\n", ".agk/  \n", ".agk/\r\n", "**/.claude/x\n.agk/",
 		".agk/\n!.agk/\n.agk/\n", // last matching rule wins
+		"!keep.txt\n.agk/\n",       // negations before it do not matter
 	} {
 		os.WriteFile(p, []byte(content), 0o644)
 		acts, err := planIgnore(ignoreCfg(home, map[string]string{}, p))
@@ -71,6 +72,8 @@ func TestIgnorePresenceSpellings(t *testing.T) {
 		"  .agk/\n",         // leading spaces are part of the pattern
 		".agk/\n!.agk/\n",   // re-included by a later rule
 		".agk/\n!/.agk\n",
+		".agk/\n!**/.agk/\n", // any later negation may re-include it
+		".agk/\n!*\n",
 	} {
 		os.WriteFile(p, []byte(content), 0o644)
 		acts, _ := planIgnore(ignoreCfg(home, map[string]string{}, p))

@@ -101,10 +101,12 @@ names matching `agk-*` plus the literal legacy name `agterm-codex-review`.
 
 Path: `git config --global --includes --path core.excludesFile` (via the injected `gitConfig`;
 `--includes` because `--global` skips `[include]` files by default, `--path` expands `~`), else
-`$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`. `.agk/` counts as ignored when the
-last rule among `.agk`, `.agk/`, `/.agk`, `/.agk/` and their `!` negations, with trailing (not
-leading) whitespace trimmed as gitignore does, is a positive one. Globs that might match are not
-evaluated; missing one only costs a redundant line. To append: resolve symlinks
+`$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`. `.agk/` counts as ignored only when
+a literal `.agk`, `.agk/`, `/.agk` or `/.agk/` rule (trailing, not leading, whitespace trimmed as
+gitignore does) comes after every `!` rule in the file: git's last matching rule wins, and any
+negation (`!**/.agk/`, `!*`) might re-include it. Otherwise `.agk/` is appended, which makes it
+last again. Positive globs that might already match are not evaluated; missing one only costs a
+redundant line. To append: resolve symlinks
 with `filepath.EvalSymlinks`, read the target, add a newline first if the file does not end with
 one, add `.agk/`, write with `fsx.ReplaceFile` keeping the file mode. A missing file is created
 with its parent directory. Editing the resolved target keeps a dotfiles symlink intact;

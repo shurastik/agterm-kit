@@ -33,7 +33,7 @@
 
 - [x] 5.1 Implement `triage.Render` per design D8 (embedded `html/template`, numbered cards with all fields, radios defaulted by severity, notes, static nonce'd script with only the submit call, CSP meta with a per-render nonce); tests assert fields and defaults are present and that hostile title/body (`<script>…`, `" onmouseover="x`, `<img src=https://…>`) appear only escaped, with exactly one `<script>` element carrying the nonce
 - [x] 5.2 Implement `triage.Decide` per design D9; tests cover valid submit, non-JSON value, missing finding, unknown id, duplicate id, bad decision, and that `title`/`file` come from the findings file
-- [x] 5.3 Implement the `agk triage <review.json>` command inside agterm (invalid input → exit 1 with no UI; zero findings → `[]` exit 0; otherwise write `triage.html`, `OverlayHTML` on `$AGTERM_SESSION_ID`, decisions to stdout + `decisions.json` exit 0; dismissed → exit 2, no output; garbage → exit 1); tests with fake `Ctl`
+- [x] 5.3 Implement the `agk triage <review.json>` command inside agterm (invalid input → exit 1 with no UI; zero findings → `[]` exit 0; otherwise write a per-call `triage-<random>.html`, `OverlayHTML` on `$AGTERM_SESSION_ID`, decisions to stdout + `decisions.json` exit 0; dismissed → exit 2, no output; garbage → exit 1); tests with fake `Ctl`
 - [x] 5.4 Implement the outside-agterm markdown table fallback with exit 3 (pipes escaped, newlines collapsed); tests cover row count and column integrity with hostile cells
 
 ## 6. Skill and docs

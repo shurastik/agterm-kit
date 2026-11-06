@@ -45,9 +45,20 @@ func (e *Env) Triage(ctx context.Context, args []string) int {
 		return e.errorf("render triage page: %v", err)
 	}
 	dir := filepath.Dir(path)
-	htmlPath := filepath.Join(dir, "triage.html")
-	if err := fsx.ReplaceFile(htmlPath, page, 0o644); err != nil {
+	// A fresh file per call (O_EXCL, never through a symlink) so overlay
+	// cleanup in one triage call cannot match another call's open page.
+	f, err := os.CreateTemp(dir, "triage-*.html")
+	if err != nil {
 		return e.errorf("%v", err)
+	}
+	htmlPath := f.Name()
+	defer os.Remove(htmlPath)
+	_, werr := f.Write(page)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return e.errorf("%v", werr)
 	}
 	out, err := e.Ctl.OverlayHTML(ctx, session, htmlPath)
 	if errors.Is(err, agterm.ErrDismissed) {

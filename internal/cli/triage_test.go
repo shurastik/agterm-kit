@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,10 +35,15 @@ func TestTriageSubmitted(t *testing.T) {
 	if code := h.env.Triage(context.Background(), []string{p}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	htmlPath := filepath.Join(filepath.Dir(p), "triage.html")
-	want := []string{"SELF", htmlPath}
-	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "OverlayHTML" || !reflect.DeepEqual(h.ctl.Calls[0].Args, want) {
+	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "OverlayHTML" || h.ctl.Calls[0].Args[0] != "SELF" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
+	htmlPath := h.ctl.Calls[0].Args[1]
+	if filepath.Dir(htmlPath) != filepath.Dir(p) || !regexp.MustCompile(`^triage-[0-9a-z]+\.html$`).MatchString(filepath.Base(htmlPath)) {
+		t.Fatalf("page path = %q", htmlPath)
+	}
+	if exists(htmlPath) {
+		t.Fatal("the per-call page must be removed when triage ends")
 	}
 	if !strings.Contains(page, `name="d-3"`) {
 		t.Fatal("overlay page was not the rendered triage page")
@@ -158,7 +163,7 @@ func TestTriageDoesNotFollowSymlinks(t *testing.T) {
 	p := reviewFile(t, threeFindings)
 	dir := filepath.Dir(p)
 	victims := map[string]string{}
-	for _, name := range []string{"triage.html", "decisions.json"} {
+	for _, name := range []string{"decisions.json"} {
 		victim := filepath.Join(t.TempDir(), name+".victim")
 		os.WriteFile(victim, []byte("precious"), 0o644)
 		if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
@@ -177,5 +182,18 @@ func TestTriageDoesNotFollowSymlinks(t *testing.T) {
 		if fi, err := os.Lstat(filepath.Join(dir, name)); err != nil || fi.Mode()&os.ModeSymlink != 0 {
 			t.Errorf("%s: want a regular file replacing the link (%v)", name, err)
 		}
+	}
+}
+
+// Each triage call shows its own page file, so cleanup in one call can never
+// match (and close) a page another call of the same report has open.
+func TestTriagePagePathIsUniquePerCall(t *testing.T) {
+	h := newHarness(t, true)
+	p := reviewFile(t, threeFindings)
+	h.ctl.OverlayErr = agterm.ErrDismissed
+	h.env.Triage(context.Background(), []string{p})
+	h.env.Triage(context.Background(), []string{p})
+	if a, b := h.ctl.Calls[0].Args[1], h.ctl.Calls[1].Args[1]; a == b {
+		t.Fatalf("both calls used %q", a)
 	}
 }

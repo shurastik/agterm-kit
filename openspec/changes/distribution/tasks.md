@@ -26,7 +26,7 @@
 
 - [x] 5.1 Add `packaging/homebrew/agk.rb.tmpl` per design D1 (tag tarball URL, sha256, `go build` with the version ldflag, `pkgshare.install "skills"`, caveat to run `agk setup`, `test do` running `agk version`); verify by rendering it for the current tree and running `brew audit --strict --formula` on the rendered file from a local tap
 - [x] 5.2 Add `scripts/release.sh VERSION` per design D2 (clean `main` in sync with origin, quality gates, tag + push, tarball sha256, render into `$AGK_TAP_DIR`, commit + push the tap); verify with `bash -n` and `shellcheck`, and a run with `DRY_RUN=1` that prints the rendered formula without tagging or pushing
-- [ ] 5.3 Publish prerequisites, each only after the owner says go: scan history for secrets and list remote refs (design Risks), report findings; make `shurastik/agterm-kit` public; create the public `shurastik/homebrew-tap` repo with a README; verify with `gh repo view --json visibility` for both
+- [x] 5.3 Publish prerequisites, each only after the owner says go: scan history for secrets and list remote refs (design Risks), report findings; make `shurastik/agterm-kit` public; create the public `shurastik/homebrew-tap` repo with a README; verify with `gh repo view --json visibility` for both
 
 ## 6. Integration
 

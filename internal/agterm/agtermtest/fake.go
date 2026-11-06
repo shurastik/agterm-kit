@@ -31,8 +31,6 @@ type Fake struct {
 	CompanionErr error
 	StatusErr    error
 	InfoErr      error
-	Outcome      agterm.Outcome
-	OverlayErr   error
 	WaitStatus   string
 	WaitErr      error
 	CloseErr     error
@@ -54,8 +52,6 @@ type Fake struct {
 	OnWait func()
 	// OnNewCompanion, when set, runs before NewCompanion returns.
 	OnNewCompanion func()
-	// OnOverlay, when set, runs before OverlayHTML returns (e.g. to read the page file).
-	OnOverlay func(file string)
 }
 
 var _ agterm.Ctl = (*Fake)(nil)
@@ -97,14 +93,6 @@ func (f *Fake) Status(ctx context.Context, target, state string) error {
 func (f *Fake) Info(ctx context.Context, target, markdown string) error {
 	f.record(ctx, "Info", target, markdown)
 	return f.InfoErr
-}
-
-func (f *Fake) OverlayHTML(ctx context.Context, target, file string) (agterm.Outcome, error) {
-	f.record(ctx, "OverlayHTML", target, file)
-	if f.OnOverlay != nil {
-		f.OnOverlay(file)
-	}
-	return f.Outcome, f.OverlayErr
 }
 
 // WaitResult is one scripted Wait answer.

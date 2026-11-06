@@ -31,7 +31,6 @@ Usage:
                                   Start the next round with findings or notes once the applier's
                                   turn is over (default 600 s); prints {"round":K}.
   agk apply close <run-dir>       Close the applier companion (undo restores it).
-  agk triage <review.json>        Triage findings in an agterm overlay; prints decisions JSON.
   agk config [--applier H[:M]] [--reviewer H[:M]]
                                   Print the resolved worker configuration (harness, model, effort,
                                   extra args, permission mode) and where each value comes from:
@@ -42,7 +41,7 @@ Usage:
                                   global git ignore, check dependencies. Rerun after every upgrade.
   agk version                     Print the agk version.
 
-Exit codes: 0 ok, 1 error, 2 dismissed by the user, 3 no agterm UI (fallback output printed).
+Exit codes: 0 ok, 1 error (2 and 3 are reserved).
 `
 
 const reviewUsage = `Usage:
@@ -67,8 +66,6 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return e.reviewCmd(ctx, args[1:])
 	case "apply":
 		return e.applyCmd(ctx, args[1:])
-	case "triage":
-		return e.Triage(ctx, args[1:])
 	case "config":
 		return e.Config(ctx, args[1:])
 	case "setup":

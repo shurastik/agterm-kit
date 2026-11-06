@@ -35,7 +35,7 @@
 
 ## 6. Triage removal
 
-- [ ] 6.1 Delete `internal/triage`, `internal/cli/triage.go` and their tests, `Ctl.OverlayHTML` and its tests, and the `agk triage` usage text; mark exit codes 2 and 3 as reserved in the usage text. Verify that `go build ./... && go test ./... && go vet ./...` pass and `grep -rn triage --include='*.go' .` finds nothing
+- [x] 6.1 Delete `internal/triage`, `internal/cli/triage.go` and their tests, `Ctl.OverlayHTML` and its tests, and the `agk triage` usage text; mark exit codes 2 and 3 as reserved in the usage text. Verify that `go build ./... && go test ./... && go vet ./...` pass and `grep -rn triage --include='*.go' .` finds nothing
 
 ## 7. Skills and docs
 

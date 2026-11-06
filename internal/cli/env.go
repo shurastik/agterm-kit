@@ -18,10 +18,10 @@ import (
 
 // Exit codes shared by all commands.
 const (
-	ExitOK        = 0
-	ExitError     = 1
-	ExitDismissed = 2
-	ExitNoAgterm  = 3
+	ExitOK    = 0
+	ExitError = 1
+	// 2 and 3 are reserved: earlier releases used them and scripts may
+	// still branch on them.
 )
 
 // Env carries every side effect a command may have.

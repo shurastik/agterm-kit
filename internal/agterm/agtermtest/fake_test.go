@@ -12,26 +12,42 @@ import (
 
 func TestFakeRecordsAndScripts(t *testing.T) {
 	ctx := context.Background()
-	seen := ""
-	f := &Fake{CompanionID: "C", Outcome: agterm.Outcome{Value: "v"}, InfoErr: errors.New("x"), OnOverlay: func(p string) { seen = p }}
+	typed := ""
+	f := &Fake{CompanionID: "C", InfoErr: errors.New("x"), TextOut: "screen", OnType: func(_, text string) { typed = text }}
 	id, _ := f.NewCompanion(ctx, "P", "n", "cmd", "/d")
 	_ = f.Status(ctx, "C", "active")
 	infoErr := f.Info(ctx, "C", "md")
-	out, _ := f.OverlayHTML(ctx, "S", "/p.html")
-	if id != "C" || out.Value != "v" || infoErr == nil || seen != "/p.html" {
-		t.Fatalf("scripted results not returned: id=%q out=%q infoErr=%v seen=%q", id, out.Value, infoErr, seen)
+	_ = f.Type(ctx, "C", "go\r")
+	screen, _ := f.Text(ctx, "C", 20)
+	_ = f.MsgSend(ctx, "C:P", "round 2")
+	if _, err := f.MsgRead(ctx, 0); !errors.Is(err, ErrNoMessage) {
+		t.Fatalf("unscripted MsgRead = %v", err)
+	}
+	if id != "C" || infoErr == nil || typed != "go\r" || screen != "screen" {
+		t.Fatalf("scripted results not returned: id=%q infoErr=%v typed=%q screen=%q", id, infoErr, typed, screen)
 	}
 	want := []Call{
 		{"NewCompanion", []string{"P", "n", "cmd", "/d"}},
 		{"Status", []string{"C", "active"}},
 		{"Info", []string{"C", "md"}},
-		{"OverlayHTML", []string{"S", "/p.html"}},
+		{"Type", []string{"C", "go\r"}},
+		{"Text", []string{"C", "20"}},
+		{"MsgSend", []string{"C:P", "round 2"}},
+		{"MsgRead", []string{"0s"}},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Fatalf("calls = %v", f.Calls)
 	}
-	if !reflect.DeepEqual(f.Methods(), []string{"NewCompanion", "Status", "Info", "OverlayHTML"}) {
-		t.Fatalf("methods = %v", f.Methods())
+}
+
+func TestFakeWaitSeq(t *testing.T) {
+	f := &Fake{WaitStatus: "idle", WaitSeq: []WaitResult{{Status: "completed"}, {Err: agterm.ErrTimeout}}}
+	ctx := context.Background()
+	s1, _ := f.Wait(ctx, "C", nil, time.Second)
+	_, e2 := f.Wait(ctx, "C", nil, time.Second)
+	s3, _ := f.Wait(ctx, "C", nil, time.Second)
+	if s1 != "completed" || !errors.Is(e2, agterm.ErrTimeout) || s3 != "idle" {
+		t.Fatalf("%q %v %q", s1, e2, s3)
 	}
 }
 

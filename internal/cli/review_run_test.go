@@ -398,3 +398,24 @@ func roundOf(rd string) int {
 	json.Unmarshal([]byte(filepath.Base(rd)), &k)
 	return k
 }
+
+// The started marker vouches that the companion's status is this round's:
+// when setting active fails, the old status may still show, so no marker.
+func TestReviewRunNoStartedMarkerWhenActiveFails(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := runDir(t)
+	h.drivers["codex"].outputs = []string{approve}
+	mailbox(h)
+	h.ctl.OnStatus = func(state string) error {
+		if state == "active" {
+			return errors.New("socket hiccup")
+		}
+		return nil
+	}
+	h.env.ReviewRun(context.Background(), []string{dir})
+	rd := filepath.Join(dir, "rounds", "1")
+	if exists(filepath.Join(rd, startedFile)) {
+		t.Fatal("unconfirmed active must not mark the round started")
+	}
+	assertResult(t, rd, "completed", 0)
+}

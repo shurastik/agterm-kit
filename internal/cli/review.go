@@ -37,9 +37,11 @@ var (
 	statusRetryDelay = 500 * time.Millisecond
 )
 
-func (r reporter) set(ctx context.Context, state, line string) {
+// set reports state and line, retrying final states; it reports whether
+// agterm took the update.
+func (r reporter) set(ctx context.Context, state, line string) bool {
 	if r.target == "" {
-		return
+		return false
 	}
 	attempts := 1
 	if state == "completed" || state == "blocked" {
@@ -48,12 +50,12 @@ func (r reporter) set(ctx context.Context, state, line string) {
 	for i := 1; ; i++ {
 		err := r.update(ctx, state, line)
 		if err == nil {
-			return
+			return true
 		}
 		// Status is best effort: a broken socket must not abort the review.
 		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
 		if i >= attempts {
-			return
+			return false
 		}
 		time.Sleep(statusRetryDelay)
 	}
@@ -220,8 +222,11 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, r
 		return fail(review.ReasonSetupFailed, err)
 	}
 	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d started, run dir %s\n", run.num, k, run.dir)
-	markStarted(run.dir, k) // before the status: statuses from now on are this round's
-	rep.set(ctx, "active", review.ReviewingLine(l))
+	if rep.set(ctx, "active", review.ReviewingLine(l)) {
+		// Only a confirmed active replaces the last round's status, so only
+		// then may `review wait` trust the statuses that follow.
+		markStarted(run.dir, k)
+	}
 	turn := harness.Turn{Worker: run.state.Worker, Root: run.root, Dir: rd, Log: reviewLog, Prompt: string(prompt),
 		Session: run.state.Session, Resume: run.state.Session != ""}
 	session, rerr := driver.Review(ctx, turn, term)

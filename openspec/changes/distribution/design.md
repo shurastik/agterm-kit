@@ -105,8 +105,9 @@ names matching `agk-*` plus the literal legacy name `agterm-codex-review`.
 
 ### D7. Excludes file
 
-Path: `git config --global --includes --path core.excludesFile` (via the injected `gitConfig`;
-`--includes` because `--global` skips `[include]` files by default, `--path` expands `~`), else
+Path: `core.excludesFile` from `git config --global --includes --path`, else from `--system`
+(git's own precedence outside a repository), via the injected `gitConfig`; `--includes` because
+`--global`/`--system` skip `[include]` files by default, `--path` expands `~`. Unset, else
 `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`. `.agk/` counts as ignored only when
 a literal `.agk`, `.agk/`, `/.agk` or `/.agk/` rule (trailing, not leading, whitespace trimmed as
 gitignore does) comes after every `!` rule in the file: git's last matching rule wins, and any

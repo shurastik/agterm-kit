@@ -126,3 +126,12 @@ func TestRereviewPrompt(t *testing.T) {
 		t.Error("no note block without a note")
 	}
 }
+
+// The reviewer may have the agk skills installed; it must review, not start
+// another review or touch workers.
+func TestPromptForbidsDrivingAgk(t *testing.T) {
+	p, _ := Prompt(sampleScope())
+	if !strings.Contains(p, "Do not run `agk`") {
+		t.Fatal("prompt must forbid running agk")
+	}
+}

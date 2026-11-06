@@ -212,7 +212,8 @@ reserved. The skill drops its triage section.
   turn is over. A collision with live typing in the same instant is still possible. That is
   accepted and documented in the skill: do not type into a working applier while the main session
   drives it.
-- [The agent-status hooks are not installed (claude or codex)] → the handshake fails
+- [The agent-status hooks are missing or silent (seen with codex)] → `apply wait` polls the report
+  every 5 s, so rounds still end. The handshake fails
   (`started: false`), so the cause is visible at once. `wait` would only reach `running` on
   timeout. Out of scope: `agk setup` checking the hooks.
 - [Claude `auto` permission mode is unavailable or changes] → the mode is configurable
@@ -236,7 +237,34 @@ reserved. The skill drops its triage section.
   `agk-apply` skill.
 - Rollback is `brew` pinning to 0.1.0. No persistent state depends on the new format.
 
+## Smoke test results (2026-11-06, agterm, claude 2.1.319, codex-cli 0.166)
+
+- **Claude applier.**
+  - In an untrusted folder, start reported `started:false` with the trust prompt on screen. After the
+    prompt was answered, round 1 ended `done` and round 2 (a typed line) ended `done`.
+  - Status hooks fire for both `active` and `completed`.
+  - The live run caught a gap: a fresh session's `idle` was read as `no-report` before the round had
+    begun. The fix is the `started` marker (D4).
+- **Codex applier.**
+  - Codex has its own folder-trust prompt, and the handshake shows it the same way.
+  - `\r` submits typed input, and codex writes the report file.
+  - On this machine, codex never changed the companion's agent status (it stayed `idle` even in a
+    trusted folder), although `[[hooks.UserPromptSubmit]]` calls agterm's codex hook and the hooks
+    feature is on.
+  - Consequences:
+    - `apply wait` polls the report between 5-second status waits, so codex rounds still end when
+      the report appears.
+    - `apply send` sees `idle`, so it never refuses a busy codex. Codex queues typed input.
+    - The `send` handshake prints a warning.
+    - `needs-human` detection (`permission`, `no-report`) needs working hooks.
+- **Codex reviewer.** Round 1 approved and recorded its thread. Round 2 resumed the same thread id.
+  `close` closed the companion.
+  - The reviewer had loaded the `agk-review` skill on its own, so the review prompt now forbids
+    running `agk`.
+- **Claude reviewer.** See task 8.1.
+
 ## Open Questions
 
-- The exact codex TUI behaviour for `session type` (whether `\r` submits; trust prompt text) is
-  checked in the smoke task. It changes only driver constants, not the contract.
+- Why codex's agterm status hooks do not report in companions here (agterm hook script or codex hook
+  environment). agk works without them through report polling; fixing them only restores
+  `needs-human` detection for codex.

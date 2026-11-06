@@ -83,9 +83,10 @@ type tenv struct {
 
 func newHarness(t *testing.T, inAgterm bool) *tenv {
 	t.Helper()
-	old := statusRetryDelay
+	old, oldSlice := statusRetryDelay, applyPollSlice
 	statusRetryDelay = 0
-	t.Cleanup(func() { statusRetryDelay = old })
+	applyPollSlice = 24 * time.Hour // one Wait call per wait unless a test says otherwise
+	t.Cleanup(func() { statusRetryDelay, applyPollSlice = old, oldSlice })
 	h := &tenv{
 		ctl:     &agtermtest.Fake{CompanionID: "COMP-1"},
 		drivers: map[string]*fakeDriver{"codex": {name: "codex"}, "claude": {name: "claude"}},

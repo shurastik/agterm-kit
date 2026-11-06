@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
@@ -514,5 +515,46 @@ func TestApplyStartAndSendMarkRoundsStarted(t *testing.T) {
 	}
 	if !exists(filepath.Join(rundir.RoundDir(dir, 2), startedFile)) {
 		t.Fatal("round 2 confirmed by the send handshake")
+	}
+}
+
+// Without agent-status hooks (seen with codex) the status never changes; the
+// report on disk must still end the wait.
+func TestApplyWaitPollsTheReport(t *testing.T) {
+	h := newHarness(t, true)
+	dir := startedApply(t, h, 1)
+	applyPollSlice = 5 * time.Second // newHarness restores it after the test
+	h.ctl.WaitErr = agterm.ErrTimeout
+	n := 0
+	h.ctl.OnWait = func() {
+		if n++; n == 3 {
+			writeReport(t, dir, 1, doneReport)
+		}
+	}
+	if code := runApply(h, "wait", dir, "--timeout", "60"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.out.String(), `"status":"done"`) || n != 3 {
+		t.Fatalf("stdout %q after %d waits", h.out, n)
+	}
+	for _, c := range h.ctl.Calls {
+		if c.Args[2] != "5s" {
+			t.Fatalf("slice = %v", c)
+		}
+	}
+
+	// No report ever: the slices add up to the timeout, then running.
+	h = newHarnessLike(t, h)
+	applyPollSlice = 5 * time.Second
+	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), apply.ReportFile))
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runApply(h, "wait", dir, "--timeout", "12"); code != 0 || !strings.Contains(h.out.String(), `"status":"running"`) {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	if got := len(h.ctl.Calls); got != 3 {
+		t.Fatalf("waits = %d, want 3 (5s+5s+2s)", got)
+	}
+	if last := h.ctl.Calls[2].Args[2]; last != "2s" {
+		t.Fatalf("last slice = %s", last)
 	}
 }

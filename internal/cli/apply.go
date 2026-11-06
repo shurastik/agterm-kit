@@ -282,6 +282,31 @@ func readReport(dir string, k int) ([]byte, error) {
 	return b, err
 }
 
+// applyPollSlice is how long one status wait lasts before the report file is
+// checked again: the report decides even when the harness's agent-status
+// hooks never fire.
+var applyPollSlice = 5 * time.Second
+
+// waitSliced waits up to left for one of until, in applyPollSlice slices,
+// returning early with found when round k's report appears. It returns the
+// unused budget.
+func (e *Env) waitSliced(ctx context.Context, companion string, until []string, left time.Duration, dir string, k int) (status string, err error, found bool, rest time.Duration) {
+	for {
+		slice := min(applyPollSlice, left)
+		status, err = e.Ctl.Wait(ctx, companion, until, slice)
+		if !errors.Is(err, agterm.ErrTimeout) {
+			return status, err, false, left
+		}
+		left -= slice
+		if r, _ := readReport(dir, k); r != nil {
+			return "", nil, true, left
+		}
+		if left <= 0 {
+			return "", err, false, 0
+		}
+	}
+}
+
 // ApplyWait implements `agk apply wait <run-dir> [--timeout SECONDS]`.
 func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 	dir, timeout, code, ok := e.parseWaitArgs("agk apply wait", rundir.Applies, defaultApplyWait, args)
@@ -304,10 +329,10 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 		// Inline runs finished before start/send returned.
 		return e.printJSON(apply.Decide(run.round, report, "completed", nil))
 	}
-	limit := time.Duration(timeout) * time.Second
-	deadline := e.Now().Add(limit)
+	left := time.Duration(timeout) * time.Second
 	var status string
 	var werr error
+	found := false
 	if !roundStarted(run.dir, run.round) {
 		// Unconfirmed start (a trust prompt, a slow login): a fresh session's
 		// idle would read as "turn over". Wait for the round to begin; a first
@@ -316,18 +341,14 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 		if run.round == 1 {
 			until = append(until, "completed")
 		}
-		status, werr = e.Ctl.Wait(ctx, companion, until, limit)
+		status, werr, found, left = e.waitSliced(ctx, companion, until, left, run.dir, run.round)
 		if status == "active" {
 			markStarted(run.dir, run.round)
 			status = ""
 		}
 	}
-	if werr == nil && status == "" {
-		left := deadline.Sub(e.Now())
-		if left < time.Second {
-			left = time.Second
-		}
-		status, werr = e.Ctl.Wait(ctx, companion, []string{"completed", "blocked", "idle"}, left)
+	if !found && werr == nil && status == "" {
+		status, werr, _, _ = e.waitSliced(ctx, companion, []string{"completed", "blocked", "idle"}, left, run.dir, run.round)
 	}
 	if werr != nil && !errors.Is(werr, agterm.ErrGone) && !errors.Is(werr, agterm.ErrTimeout) {
 		return e.errorf("wait for applier %s: %v", companion, werr)

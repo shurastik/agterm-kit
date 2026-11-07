@@ -292,3 +292,18 @@ func TestReviewStartInvalidConfig(t *testing.T) {
 		t.Fatalf("stderr %q, calls %v", h.err, h.ctl.Calls)
 	}
 }
+
+func TestReviewStartMalformedReviewerFlag(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "gemini"}); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.err.String(), "--reviewer") || h.out.Len() != 0 {
+		t.Fatalf("stderr %q stdout %q", h.err, h.out)
+	}
+	if exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+		t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
+	}
+}

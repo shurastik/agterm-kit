@@ -425,8 +425,14 @@ func TestApplySendHandshakeTimeoutWarns(t *testing.T) {
 	if code := runApply(h, "send", dir, msg); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if !strings.Contains(h.err.String(), "warning") {
-		t.Fatalf("stderr = %q", h.err)
+	if !strings.Contains(h.err.String(), "did not report round 2 as started") || h.out.String() != "{\"round\":2}\n" {
+		t.Fatalf("stderr %q stdout %q", h.err, h.out)
+	}
+	if k, _ := rundir.Round(dir); k != 2 {
+		t.Fatalf("round = %d, want 2 kept", k)
+	}
+	if exists(filepath.Join(rundir.RoundDir(dir, 2), startedFile)) {
+		t.Fatal("round 2 must not be marked started without active")
 	}
 }
 
@@ -570,5 +576,36 @@ func TestApplyInlineFailedStartKeepsNoSession(t *testing.T) {
 	}
 	if s := readApplyState(t, applyDir(root)); s.Session != "" {
 		t.Fatalf("an unconfirmed session must not be kept: %q", s.Session)
+	}
+}
+
+func TestApplyStartMalformedApplierFlag(t *testing.T) {
+	h := newHarness(t, true)
+	root := repoWith(t, h, "")
+	if code := runApply(h, "start", "--applier", "gemini", "add-auth"); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.err.String(), "--applier") || h.out.Len() != 0 {
+		t.Fatalf("stderr %q stdout %q", h.err, h.out)
+	}
+	if exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+		t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
+	}
+}
+
+func TestApplyStartNumbersRunsPerKind(t *testing.T) {
+	h := newHarness(t, true)
+	root := repoWith(t, h, "")
+	h.ctl.WaitStatus = "active"
+	for _, d := range []string{"applies/20261101-090000", "applies/20261102-090000", "reviews/20261103-090000"} {
+		if err := os.MkdirAll(filepath.Join(root, ".agk", d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if name := h.ctl.Calls[0].Args[1]; name != "claude-apply #3" {
+		t.Fatalf("name = %q", name)
 	}
 }

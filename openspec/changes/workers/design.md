@@ -67,7 +67,10 @@ and every follow-up loses the live TUI. It is kept only as the fallback outside 
    permission prompt is open, and typed text would answer it.
 2. Writes `rounds/<k+1>/prompt.md` and records the round.
 3. Types `Read <abs>/rounds/<k+1>/prompt.md and follow it.\r`.
-4. Requires `active` within 30 s (handshake).
+4. Waits up to 30 s for `active` (handshake) and writes `rounds/<k+1>/started` once it arrives.
+   On timeout it only warns: codex's status hooks stay silent in companions on this machine, so
+   a hard failure would refuse every codex round. `apply wait` still finishes the round through
+   the report file.
 
 A single line with no embedded newlines cannot be split into several submits.
 *Alternative:* `codex queue` exists, but only for codex; claude has no equivalent, so typing is
@@ -134,12 +137,17 @@ the recorded base, writes the re-review prompt, records round k+1, and sends `ms
 **Resume:**
 - **Codex:** round 1 uses `codex exec -s read-only -C <root> --json --output-schema S -o out -`,
   without `--ephemeral`. The thread id comes from the first `thread.started` event and is stored
-  in `worker.json`. Round k>1 runs `codex exec resume <thread> -c sandbox_mode="read-only" --json
-  --output-schema S -o out -` with cwd `<root>`.
+  in `worker.json`. Round k>1 runs `codex exec [tuning] resume <thread> -c sandbox_mode="read-only"
+  --json --output-schema S -o out -` with cwd `<root>`. Tuning options (`-m`, `-c
+  model_reasoning_effort=…`, extra args) go before `resume`, which rejects some of them
+  (`--profile`).
 - **Claude:** round 1 runs `claude -p --session-id <uuid> --output-format stream-json --verbose
-  --json-schema <schema> --permission-mode dontAsk --allowedTools <read-only list>`. Round k>1 is
-  the same with `--resume <uuid>`. The `result` event's `structured_output` is written to
-  `output.json`.
+  --json-schema <schema> --restricted --strict-mcp-config --tools Read,Grep,Glob,Bash
+  --permission-mode dontAsk --allowedTools <read-only git list>`. `--restricted` ignores the
+  user and project settings, so no inherited allow rule widens the reviewer; `--strict-mcp-config`
+  keeps MCP servers out; `--tools` limits the built-in tool set. The schema is passed without its
+  `$schema` key, which claude rejects. Round k>1 is the same with `--resume <uuid>`. The `result`
+  event's `structured_output` is written to `output.json`.
 - With no recorded session id, the round starts fresh with the first-round prompt.
 
 *Alternative:* a new reviewer per round. That loses memory, and the explore session explicitly

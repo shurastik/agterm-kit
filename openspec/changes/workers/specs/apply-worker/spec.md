@@ -99,12 +99,17 @@ At the end of every round the applier SHALL be instructed to write `rounds/<k>/r
 - **THEN** it prints `status` `cancelled`
 
 ### Requirement: Follow-up round
-`agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]` SHALL start round k+1 in the live applier session: wait (default 600 s) until its current turn is over, write `rounds/<k+1>/prompt.md` from the built-in fix template and the given message, record round k+1, type a single-line instruction to read that prompt into the session, and confirm the session became `active`. It SHALL print `{"round": k+1}`.
+`agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]` SHALL start round k+1 in the live applier session: wait (default 600 s) until its current turn is over, write `rounds/<k+1>/prompt.md` from the built-in fix template and the given message, record round k+1, type a single-line instruction to read that prompt into the session, and wait up to 30 seconds for the session to become `active`, warning on stderr when it does not. It SHALL print `{"round": k+1}`.
 
 #### Scenario: Review findings sent to the applier
 - **GIVEN** apply run D finished round 1 with `done`
 - **WHEN** the agent runs `agk apply send D findings.md`
 - **THEN** `rounds/2/prompt.md` contains the content of `findings.md` and the absolute path of `rounds/2/report.json`, the companion receives one line pointing at `rounds/2/prompt.md` followed by Enter, and stdout is `{"round":2}`
+
+#### Scenario: Round start not confirmed
+- **GIVEN** apply run D finished round 1 and its applier does not report `active` after the line is typed
+- **WHEN** the agent runs `agk apply send D notes.md`
+- **THEN** round 2 stays recorded, stderr carries a warning that the applier did not report round 2 as started, stdout is `{"round":2}` and the exit code is 0, so `agk apply wait D` can still finish the round through its report file
 
 #### Scenario: Applier still busy
 - **GIVEN** the applier of D is mid-turn

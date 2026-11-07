@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: nothing-changed
+description: "Nothing changed after the pass: the agent runs agk review close with no further review round."
+plugins: ["../../case-plugins/nothing-changed"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: nothing-changed

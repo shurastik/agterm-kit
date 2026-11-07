@@ -1,0 +1,2 @@
+## openspec/changes/add-widget/design.md:1 (comment)
+Say where the widget is stored.

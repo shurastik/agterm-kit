@@ -124,6 +124,9 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 		Collect: func(context.Context, string, string) (review.Scope, error) {
 			return review.Scope{}, errors.New("collect not scripted")
 		},
+		CollectPlan: func(context.Context, string, string) (review.PlanScope, error) {
+			return review.PlanScope{}, errors.New("collect plan not scripted")
+		},
 	}
 	return h
 }

@@ -74,3 +74,19 @@ func TestDepsAgtermctlResolvedLikeHooks(t *testing.T) {
 		t.Fatalf("env not executable: %+v", a)
 	}
 }
+
+func TestDepsRevdiffFound(t *testing.T) {
+	onPath := map[string]bool{"git": true, "codex": true, "claude": true, "openspec": true, "revdiff": true}
+	a := byPath(planDeps(depsCfg(onPath, nil, nil)))["revdiff"]
+	if a.Kind != KindFound || a.Target != "/bin/revdiff" {
+		t.Fatalf("%+v, want found", a)
+	}
+}
+
+func TestDepsMissingRevdiffIsOptional(t *testing.T) {
+	onPath := map[string]bool{"git": true, "codex": true, "claude": true, "openspec": true, "agtermctl": true}
+	a := byPath(planDeps(depsCfg(onPath, nil, nil)))["revdiff"]
+	if a.Kind != KindMissing || !a.Optional || a.Failed() {
+		t.Fatalf("%+v, want optional missing", a)
+	}
+}

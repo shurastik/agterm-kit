@@ -57,3 +57,19 @@ func TestReviewStartHelpExitsZero(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 }
+
+// Every usage text documents the plan review mode, and `review start -h`
+// lists the flag.
+func TestUsageDocumentsChange(t *testing.T) {
+	const line = "agk review start [--base REF | --change NAME] [--reviewer H[:M]]"
+	for name, text := range map[string]string{"usage": usage, "review usage": reviewUsage} {
+		if !strings.Contains(text, line) {
+			t.Errorf("%s lacks %q", name, line)
+		}
+	}
+	h := newHarness(t, true)
+	h.env.Main(context.Background(), []string{"review", "start", "-h"})
+	if !strings.Contains(h.err.String(), "-change") {
+		t.Fatalf("review start -h = %q", h.err)
+	}
+}

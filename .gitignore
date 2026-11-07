@@ -19,3 +19,6 @@
 
 # OS
 .DS_Store
+
+# Eval results (claude plugin eval)
+evals/cases/results/

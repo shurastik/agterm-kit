@@ -307,3 +307,176 @@ func TestReviewStartMalformedReviewerFlag(t *testing.T) {
 		t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
 	}
 }
+
+func samplePlanScope(root string) review.PlanScope {
+	return review.PlanScope{Root: root, Change: "add-x", Files: []review.UntrackedFile{
+		{Path: "openspec/changes/add-x/proposal.md", Content: "PROPOSAL_BODY\n"},
+	}}
+}
+
+// scriptPlan makes CollectPlan return the plan scope of add-x under root and
+// records its arguments; Collect must not be called.
+func scriptPlan(h *tenv, root string) *[]string {
+	var seen []string
+	h.env.CollectPlan = func(_ context.Context, dir, change string) (review.PlanScope, error) {
+		seen = append(seen, dir, change)
+		s := samplePlanScope(root)
+		s.Change = change
+		return s, nil
+	}
+	h.env.Collect = func(context.Context, string, string) (review.Scope, error) {
+		return review.Scope{}, errors.New("diff scope must not be collected for a plan review")
+	}
+	return &seen
+}
+
+func TestReviewStartChangeSpawnsCompanion(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	seen := scriptPlan(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !reflect.DeepEqual(*seen, []string{h.env.Cwd, "add-x"}) {
+		t.Fatalf("collect plan args = %q", *seen)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	prompt, err := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
+	want, _ := review.PlanPrompt(samplePlanScope(root))
+	if err != nil || string(prompt) != want {
+		t.Fatalf("prompt.md is not the plan prompt: %v\n%s", err, prompt)
+	}
+	if s := readState(t, dir); s.Change != "add-x" || s.Base != "" || s.Worker.Harness != "codex" {
+		t.Fatalf("worker.json = %+v", s)
+	}
+	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "codex-review #1" {
+		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
+	if !strings.Contains(h.out.String(), `"companion":"COMP-1"`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+}
+
+func TestReviewStartChangeInline(t *testing.T) {
+	h := newHarness(t, false)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptPlan(h, root)
+	h.drivers["codex"].outputs = []string{threeFindings}
+	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	if h.out.String() != `{"companion":null,"dir":"`+dir+`"}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if tr := h.drivers["codex"].turns; len(tr) != 1 || !strings.Contains(tr[0].Prompt, "PROPOSAL_BODY") {
+		t.Fatalf("turns = %+v", tr)
+	}
+	if len(h.ctl.Calls) != 0 {
+		t.Fatalf("no agterm calls expected: %v", h.ctl.Calls)
+	}
+}
+
+func TestReviewStartChangeRefusals(t *testing.T) {
+	cases := map[string]struct {
+		args    []string
+		collect func(context.Context, string, string) (review.PlanScope, error)
+		want    string
+		read    bool // whether CollectPlan may be called
+	}{
+		"path-like name":          {args: []string{"--change", "../secrets"}, want: "invalid change name"},
+		"upper case name":         {args: []string{"--change", "Add_X"}, want: "invalid change name"},
+		"with base":               {args: []string{"--change", "add-x", "--base", "develop"}, want: "exclude each other"},
+		"with default base given": {args: []string{"--base", "main", "--change", "add-x"}, want: "exclude each other"},
+		"missing change": {args: []string{"--change", "add-y"}, read: true, want: `change "add-y" not found`,
+			collect: func(context.Context, string, string) (review.PlanScope, error) {
+				return review.PlanScope{}, errors.New(`change "add-y" not found: no openspec/changes/add-y`)
+			}},
+		"empty change": {args: []string{"--change", "add-x"}, read: true, want: "nothing to review",
+			collect: func(context.Context, string, string) (review.PlanScope, error) {
+				return review.PlanScope{}, review.ErrNothingToReview
+			}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			root, _ := filepath.EvalSymlinks(t.TempDir())
+			h.env.Cwd = root
+			called := false
+			h.env.CollectPlan = func(ctx context.Context, dir, change string) (review.PlanScope, error) {
+				called = true
+				if c.collect == nil {
+					return samplePlanScope(root), nil
+				}
+				return c.collect(ctx, dir, change)
+			}
+			if code := h.env.ReviewStart(context.Background(), c.args); code != 1 {
+				t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
+			}
+			if !strings.Contains(h.err.String(), c.want) || h.out.Len() != 0 {
+				t.Fatalf("stderr %q stdout %q", h.err, h.out)
+			}
+			if called != c.read {
+				t.Fatalf("CollectPlan called = %v, want %v", called, c.read)
+			}
+			if exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+				t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
+			}
+		})
+	}
+}
+
+// An empty --change (e.g. from an empty shell variable) must not fall back
+// to a diff review.
+func TestReviewStartEmptyChangeRefused(t *testing.T) {
+	for name, args := range map[string][]string{
+		"alone":     {"--change="},
+		"separate":  {"--change", ""},
+		"with base": {"--change=", "--base", "main"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			root, _ := filepath.EvalSymlinks(t.TempDir())
+			h.env.Cwd = root
+			collected := false
+			h.env.Collect = func(context.Context, string, string) (review.Scope, error) {
+				collected = true
+				return review.Scope{Root: root, Base: "main", MergeBase: "mb", Diff: "+x\n"}, nil
+			}
+			h.env.CollectPlan = func(context.Context, string, string) (review.PlanScope, error) {
+				collected = true
+				return samplePlanScope(root), nil
+			}
+			if code := h.env.ReviewStart(context.Background(), args); code != 1 {
+				t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
+			}
+			if collected || h.out.Len() != 0 || exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+				t.Fatalf("nothing may be collected or started: stderr %q calls %v", h.err, h.ctl.Calls)
+			}
+		})
+	}
+}
+
+// Each run records its target: a diff review its base and no change, a plan
+// review its change and no base.
+func TestReviewStartRecordsTargetOfEachKind(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--base", "main"}); code != 0 {
+		t.Fatalf("diff: exit %d: %s", code, h.err)
+	}
+	if s := readState(t, filepath.Join(root, ".agk", "reviews", "20261105-100000")); s.Base != "main" || s.Change != "" {
+		t.Fatalf("diff run state = %+v", s)
+	}
+
+	h = newHarness(t, true)
+	root2, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptPlan(h, root2)
+	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x"}); code != 0 {
+		t.Fatalf("plan: exit %d: %s", code, h.err)
+	}
+	if s := readState(t, filepath.Join(root2, ".agk", "reviews", "20261105-100000")); s.Change != "add-x" || s.Base != "" {
+		t.Fatalf("plan run state = %+v", s)
+	}
+}

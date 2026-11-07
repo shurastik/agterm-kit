@@ -67,6 +67,22 @@ between rounds; you close it when the loop is over.
    ```
    ⌘Z in agterm brings the companion back. Then continue the workflow (`/opsx:verify`).
 
+## Plan review (`--change`)
+
+To review the planning artifacts of an OpenSpec change instead of a code diff (the `agk-propose`
+skill does this after writing a change):
+
+```bash
+agk review start --change <change>   # not together with --base
+```
+
+The scope is every file of `openspec/changes/<change>/` plus the current main spec of each
+capability the change has a delta for, read from disk whatever their git state. `nothing to review`
+(exit 1) means the change has no files; an unknown or invalid change name also exits 1 without
+starting anything. Everything after start is the same loop: `agk review wait`, act on the findings
+(they point at artifact lines), `agk review send <dir> --note <file>` re-reads the change from disk
+for the next round in the same reviewer session, `agk review close <dir>` at the end.
+
 ## Choosing the reviewer
 
 The reviewer is `codex` unless configured otherwise:

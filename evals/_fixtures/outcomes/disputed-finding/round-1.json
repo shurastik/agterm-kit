@@ -1,0 +1,17 @@
+{
+  "verdict": "needs-attention",
+  "summary": "Widget listing should be configurable.",
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "Read widget settings from a configuration file",
+      "body": "design.md says no configuration file is read, so the widgets directory and the sort order are hard-coded. Projects will want to change both.",
+      "file": "openspec/changes/add-widget/design.md",
+      "line_start": 5,
+      "line_end": 6,
+      "confidence": 0.7,
+      "recommendation": "Add a `widget.toml` configuration file with the directory and sort order, and read it in `widget list`."
+    }
+  ],
+  "next_steps": ["Make the widget listing configurable."]
+}

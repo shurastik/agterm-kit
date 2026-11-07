@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: plain-propose-request
+description: "Plain propose request: without naming agk-propose the agent does not run a plan review."
+plugins: ["../../case-plugins/plain-propose-request"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: plain-propose-request

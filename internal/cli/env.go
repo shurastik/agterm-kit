@@ -32,6 +32,7 @@ type Env struct {
 	Ctl            agterm.Ctl
 	Driver         func(name string) (harness.Driver, error)
 	Collect        func(ctx context.Context, dir, base string) (review.Scope, error)
+	CollectPlan    func(ctx context.Context, dir, change string) (review.PlanScope, error)
 	RepoRoot       func(ctx context.Context, dir string) (string, error)
 	// ApplyState reports an OpenSpec change's apply state (ready, blocked,
 	// all_done) and the CLI's message.
@@ -68,6 +69,7 @@ func NewEnv() (*Env, error) {
 			return harness.New(name, harness.DefaultRuntime())
 		},
 		Collect:      review.Collect,
+		CollectPlan:  review.CollectPlan,
 		RepoRoot:     review.RepoRoot,
 		ApplyState:   apply.OpenSpecState,
 		NewSessionID: harness.NewSessionID,

@@ -1,0 +1,6 @@
+{
+  "name": "agk-evals",
+  "version": "0.0.0",
+  "description": "Eval suite of the agk skills (not shipped). Run with scripts/eval-skills.sh.",
+  "experimental": { "evals": "cases" }
+}

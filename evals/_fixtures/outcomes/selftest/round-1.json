@@ -1,0 +1,17 @@
+{
+  "verdict": "needs-attention",
+  "summary": "One task is missing.",
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "No task implements the widget requirement",
+      "body": "The spec adds a widget requirement but tasks.md has no task for it.",
+      "file": "openspec/changes/add-widget/tasks.md",
+      "line_start": 1,
+      "line_end": 1,
+      "confidence": 0.9,
+      "recommendation": "Add a task that implements the widget requirement."
+    }
+  ],
+  "next_steps": ["Add the missing task."]
+}

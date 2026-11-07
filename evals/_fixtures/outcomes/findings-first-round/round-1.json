@@ -1,0 +1,17 @@
+{
+  "verdict": "needs-attention",
+  "summary": "The spec's scenario has no task that tests it.",
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "No task covers an empty widgets/ directory",
+      "body": "tasks.md has one task with a test for two widgets, but nothing defines or tests what `widget list` does when `widgets/` is empty, so the implementation can pick any behavior.",
+      "file": "openspec/changes/add-widget/tasks.md",
+      "line_start": 5,
+      "line_end": 5,
+      "confidence": 0.85,
+      "recommendation": "Add a task (and a spec scenario) for an empty widgets/ directory: print nothing and exit 0."
+    }
+  ],
+  "next_steps": ["Cover the empty widgets/ directory in the spec and tasks."]
+}

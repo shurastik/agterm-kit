@@ -8,17 +8,20 @@ import (
 const usage = `agk - agterm workflow kit
 
 Usage:
-  agk review start [--base REF] [--reviewer H[:M]]
+  agk review start [--base REF | --change NAME] [--reviewer H[:M]]
                                   Review changes since the merge base of REF (default main) in a
                                   <harness>-review companion; prints {"companion","dir"}.
+                                  --change reviews the planning artifacts of OpenSpec change NAME
+                                  (and the main specs its deltas touch) instead of a diff.
                                   Outside agterm the review runs inline (companion null).
   agk review run <run-dir>        The reviewer loop inside the companion (runs rounds on request).
   agk review wait <run-dir> [--timeout SECONDS]
                                   Wait for the current round's outcome (default 1800 s) and print it
                                   as {"status":"completed|blocked|cancelled|running","round":K,...}.
   agk review send <run-dir> [--note FILE]
-                                  Start the next round: re-review the current diff in the same
-                                  reviewer session; prints {"companion","dir","round"}.
+                                  Start the next round: re-review the current diff (or the change's
+                                  artifacts) in the same reviewer session; prints
+                                  {"companion","dir","round"}.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
   agk apply start <change> [--applier H[:M]]
                                   Start the applier for an OpenSpec change in a <harness>-apply
@@ -45,7 +48,7 @@ Exit codes: 0 ok, 1 error (2 and 3 are reserved).
 `
 
 const reviewUsage = `Usage:
-  agk review start [--base REF] [--reviewer H[:M]]   REF defaults to main
+  agk review start [--base REF | --change NAME] [--reviewer H[:M]]   REF defaults to main
   agk review run <run-dir>
   agk review wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 1800
   agk review send <run-dir> [--note FILE]

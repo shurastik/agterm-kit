@@ -1,0 +1,38 @@
+#!/bin/bash
+# Stand-in revdiff for the skill evals: logs its argv to agk-calls.log, notes
+# whether --only covers every file of the change under review and where the
+# description file is, and prints the annotations of case $EVAL_AGK_CASE for
+# this launch (.eval/outcomes/<case>/revdiff-<n>.txt, staged by the scaffold;
+# none = quit without annotations).
+set -uo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+log="$root/agk-calls.log"
+echo "revdiff $*" >> "$log"
+note() { echo "  $*" >> "$log"; }
+only=(); desc=""
+for a in "$@"; do
+  case "$a" in
+    --only=*) only+=("${a#--only=}") ;;
+    --description-file=*) desc="${a#--description-file=}" ;;
+  esac
+done
+missing=""
+for f in $(cd "$root" && find openspec/changes -mindepth 2 -type f ! -name .keep | sort); do
+  hit=""
+  for o in "${only[@]+"${only[@]}"}"; do
+    o="${o#./}"; o="${o#"$root"/}"
+    [ "$o" = "$f" ] && hit=1
+  done
+  [ -n "$hit" ] || missing="$missing $f"
+done
+if [ -z "$missing" ]; then note "revdiff: --only covers every change file"; else note "revdiff: no --only for:$missing"; fi
+if [ -z "$desc" ]; then note "revdiff: no description file"
+elif [[ "$(dirname "$desc")" == *"/.agk/reviews/"* || "$(dirname "$desc")" == ".agk/reviews/"* ]] && [ "$(basename "$desc")" = "revdiff-description.md" ]; then
+  note "revdiff: description file is the run dir's revdiff-description.md"
+else note "revdiff: description file elsewhere: $desc"
+fi
+mkdir -p "$root/.agk"
+n=$(( $(cat "$root/.agk/revdiff-launches" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$root/.agk/revdiff-launches"
+ann="$root/.eval/outcomes/${EVAL_AGK_CASE:-none}/revdiff-$n.txt"
+if [ -f "$ann" ]; then cat "$ann"; note "revdiff: launch $n returned annotations"; else note "revdiff: launch $n, user quit without annotations"; fi

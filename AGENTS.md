@@ -13,6 +13,11 @@ visible terminal companion:
 - the **reviewer** (`agk review`): a read-only codex or claude review of the diff with structured
   findings, kept alive between rounds so re-reviews resume its session.
 
+The reviewer also reviews plans: `agk review start --change <name>` checks an OpenSpec change's
+artifacts instead of a diff. The `agk-propose` skill (`/agk-propose`) runs the plan step around it:
+the project's `openspec-propose` workflow writes the change, the reviewer reviews it until it
+approves, the user annotates it in revdiff, and the skill stops before implementation.
+
 Which harness and model each role uses comes from flags, `.agk.toml` and `~/.config/agk/config.toml`.
 Installed with Homebrew; `agk setup` links the agent skills that teach the main session the loop.
 
@@ -23,6 +28,7 @@ go build -o .bin/agk ./cmd/agk   # Build binary
 go test ./...                    # Unit tests
 go vet ./...                     # Vet
 go mod tidy                      # Sync deps
+scripts/eval-skills.sh           # Skill evals (claude plugin eval; spends API usage, not in go test)
 ```
 
 ## Install
@@ -45,7 +51,9 @@ agk apply start <change> [--applier H[:M]]   # applier companion; prints {"compa
 agk apply wait <dir>                         # {"status":"done|blocked|needs-human|cancelled|running","round":K,...}
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
-agk review start [--base main] [--reviewer H[:M]]   # reviewer companion; prints {"companion","dir"}
+agk review start [--base main | --change <change>] [--reviewer H[:M]]
+                                             # reviewer companion; prints {"companion","dir"};
+                                             # --change reviews an OpenSpec change's plan, not a diff
 agk review wait <dir>                        # {"status":"completed|blocked|cancelled|running","round":K,...}
 agk review send <dir> [--note FILE]          # re-review round in the same reviewer session
 agk review close <dir>
@@ -70,7 +78,9 @@ harness = "codex"
 model = "gpt-5.5"
 ```
 
-The agent-facing workflows live in `skills/agk-apply/SKILL.md` and `skills/agk-review/SKILL.md`.
+The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-review/SKILL.md` and
+`skills/agk-propose/SKILL.md` (the plan step: `/agk-propose` writes a change, reviews it with
+`agk review start --change` and the user's revdiff pass, and stops before `agk apply`).
 
 ## Layout
 
@@ -90,7 +100,8 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md` and `skills/agk-r
 | `assets/` | Embedded files: review schema and prompts, applier prompts and rules, claude deny settings, reviewer tool list |
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
 | `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
-| `scripts/` | `release.sh`: tag a version and bump the tap formula |
+| `scripts/` | `release.sh`: tag a version and bump the tap formula; `eval-skills.sh`: run the skill evals |
+| `evals/` | Eval suite of the `agk-propose` skill for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
 `rounds/<k>/` per round (gitignored here).

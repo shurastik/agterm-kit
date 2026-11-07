@@ -1,0 +1,104 @@
+#!/bin/bash
+# Stand-in agk for the skill evals: logs its argv to agk-calls.log in the
+# workspace and plays the review outcomes of case $EVAL_AGK_CASE from
+# .eval/outcomes/<case>/round-<k>.json, staged into the workspace by the
+# scaffold from evals/_fixtures/outcomes/ (approve when absent).
+set -uo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+log="$root/agk-calls.log"
+outcomes="$root/.eval/outcomes/${EVAL_AGK_CASE:-none}"
+companion="EVAL-COMPANION"
+echo "agk $*" >> "$log"
+note() { echo "  $*" >> "$log"; }
+die() { echo "agk: $*" >&2; note "error: $*"; exit 1; }
+need() { [ "$2" -ge 2 ] || die "flag $1 needs a value"; } # flag, args left
+
+checksums() { # change -> sorted "sum  path" lines of the change's files
+  (cd "$root" && find "openspec/changes/$1" -type f -print0 | sort -z | xargs -0 shasum 2>/dev/null)
+}
+run_dir() { # validate a run dir argument
+  local d="$1"
+  [ -n "$d" ] && [ -f "$d/round" ] && [ -f "$d/change" ] || die "$d is not a review run directory"
+  (cd "$d" && pwd -P)
+}
+
+cmd="${1:-}"; sub="${2:-}"
+case "$cmd $sub" in
+"review start")
+  shift 2
+  change=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --change) need --change $#; change="${2:-}"; shift 2 ;;
+      --change=*) change="${1#--change=}"; shift ;;
+      --base|--base=*) die "--change and --base exclude each other" ;;
+      --reviewer) need --reviewer $#; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ "$change" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "invalid change name \"$change\""
+  [ -d "$root/openspec/changes/$change" ] || die "change \"$change\" not found: no openspec/changes/$change"
+  files="$(cd "$root/openspec/changes/$change" && find . -type f | sed 's#^\./##' | sort | tr '\n' ' ')"
+  [ -n "$files" ] || die "nothing to review"
+  note "files: $files"
+  n=1; while [ -e "$root/.agk/reviews/$n" ]; do n=$((n + 1)); done
+  dir="$root/.agk/reviews/$n"
+  mkdir -p "$dir/rounds/1"
+  echo 1 > "$dir/round"; echo "$change" > "$dir/change"
+  checksums "$change" > "$dir/rounds/1/checksums"
+  printf '{"companion":"%s","dir":"%s"}\n' "$companion" "$dir"
+  ;;
+"review wait")
+  dir="$(run_dir "${3:-}")" || exit 1
+  k="$(cat "$dir/round")"; rd="$dir/rounds/$k"
+  if [ ! -f "$rd/review.json" ]; then
+    if [ -f "$outcomes/round-$k.json" ]; then cp "$outcomes/round-$k.json" "$rd/review.json"
+    else printf '{"verdict":"approve","summary":"The plan is consistent; nothing material to report.","findings":[],"next_steps":[]}\n' > "$rd/review.json"
+    fi
+  fi
+  findings="$(grep -c '"title"' "$rd/review.json")"
+  verdict="$(grep -o '"verdict": *"[a-z-]*"' "$rd/review.json" | sed 's/.*"\([a-z-]*\)"$/\1/')"
+  echo "$verdict" > "$dir/last-verdict"
+  note "round $k: $findings finding(s), verdict $verdict"
+  printf '{"status":"completed","round":%s,"findings":%s,"verdict":"%s"}\n' "$k" "$findings" "$verdict"
+  ;;
+"review send")
+  shift 2
+  d=""; notefile=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --note) need --note $#; notefile="${2:-}"; shift 2 ;;
+      --note=*) notefile="${1#--note=}"; shift ;;
+      *) d="$1"; shift ;;
+    esac
+  done
+  dir="$(run_dir "$d")" || exit 1
+  k="$(cat "$dir/round")"
+  [ -f "$dir/rounds/$k/review.json" ] || die "round $k of $dir is still running; wait for it first"
+  if [ -n "$notefile" ]; then [ -r "$notefile" ] || die "read note: $notefile: no such file"; fi
+  change="$(cat "$dir/change")"
+  [ -d "$root/openspec/changes/$change" ] || die "change \"$change\" not found: no openspec/changes/$change"
+  next=$((k + 1)); mkdir -p "$dir/rounds/$next"
+  if [ -n "$notefile" ]; then
+    cp "$notefile" "$dir/rounds/$next/note.md"
+    while IFS= read -r line || [ -n "$line" ]; do note "note: $line"; done < "$notefile"
+  fi
+  checksums "$change" > "$dir/rounds/$next/checksums"
+  changed="$(diff "$dir/rounds/$k/checksums" "$dir/rounds/$next/checksums" | grep '^>' | awk '{print $3}' | sed "s#^openspec/changes/$change/##" | sort -u | tr '\n' ' ')"
+  note "changed since round $k: ${changed:-nothing}"
+  echo "$next" > "$dir/round"
+  printf '{"companion":"%s","dir":"%s","round":%s}\n' "$companion" "$dir" "$next"
+  ;;
+"review close")
+  dir="$(run_dir "${3:-}")" || exit 1
+  note "close: last verdict $(cat "$dir/last-verdict" 2>/dev/null || echo none)"
+  ;;
+"apply "*)
+  echo "agk stand-in: apply is not run in evals" >&2
+  ;;
+"version "*|"--version "*)
+  echo "agk 0.0.0-eval (stand-in)"
+  ;;
+*)
+  ;;
+esac

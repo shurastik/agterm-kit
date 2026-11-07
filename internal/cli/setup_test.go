@@ -207,3 +207,14 @@ func TestSetupRelativeExcludesFileLeavesProjectAlone(t *testing.T) {
 		t.Errorf("output:\n%s", s.out)
 	}
 }
+
+func TestSetupMissingRevdiffIsOptional(t *testing.T) {
+	s := newSetupHarness(t)
+	delete(s.path, "revdiff")
+	if code := s.run(); code != ExitOK {
+		t.Fatalf("exit %d: %s", code, s.out)
+	}
+	if !strings.Contains(s.out.String(), "missing  revdiff (optional)") {
+		t.Errorf("output:\n%s", s.out)
+	}
+}

@@ -47,3 +47,9 @@ var FixPrompt string
 //
 //go:embed claude-applier-settings.json
 var ClaudeApplierSettings []byte
+
+// PlanReviewPrompt is the text/template for the review of an OpenSpec
+// change's planning artifacts (`agk review start --change`).
+//
+//go:embed plan-review-prompt.md
+var PlanReviewPrompt string

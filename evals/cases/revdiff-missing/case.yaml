@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: revdiff-missing
+description: "revdiff missing: the agent says the revdiff pass was skipped and goes on without launching revdiff."
+plugins: ["../../case-plugins/revdiff-missing"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: revdiff-missing

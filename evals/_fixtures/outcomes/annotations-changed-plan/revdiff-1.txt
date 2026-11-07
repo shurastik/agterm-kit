@@ -1,0 +1,2 @@
+## openspec/changes/add-widget/design.md:5 (comment)
+Say what `widget list` prints when `widgets/` does not exist: nothing, and it exits 0.

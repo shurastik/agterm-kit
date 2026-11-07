@@ -78,9 +78,11 @@ const (
 )
 
 // reviewState is worker.json: the configuration a review run is pinned to.
+// A diff review records its base, a plan review its change.
 type reviewState struct {
 	Worker  config.Worker `json:"worker"`
-	Base    string        `json:"base"`
+	Base    string        `json:"base,omitempty"`
+	Change  string        `json:"change,omitempty"`
 	Session string        `json:"session,omitempty"`
 }
 
@@ -320,11 +322,12 @@ func (e *Env) envCommand(argv ...string) (string, error) {
 	return strings.Join(parts, " "), nil
 }
 
-// ReviewStart implements `agk review start [--base REF] [--reviewer H[:M]]`.
+// ReviewStart implements `agk review start [--base REF | --change NAME] [--reviewer H[:M]]`.
 func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("agk review start", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	base := fs.String("base", "main", "review changes since the merge base of this ref and HEAD")
+	change := fs.String("change", "", "review the planning artifacts of this OpenSpec change instead of a diff (excludes --base)")
 	reviewer := fs.String("reviewer", "", "reviewer HARNESS[:MODEL] for this run")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -335,35 +338,46 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if fs.NArg() != 0 {
 		return e.errorf("unexpected arguments %q", fs.Args())
 	}
-	scope, err := e.Collect(ctx, e.Cwd, *base)
+	state := reviewState{Base: *base}
+	// Mode follows the flags given, not their values: an empty --change must
+	// not fall back to a diff review.
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["change"] {
+		if given["base"] {
+			return e.errorf("--change and --base exclude each other")
+		}
+		if !changeName.MatchString(*change) {
+			return e.errorf("invalid change name %q: want kebab-case, like add-dark-mode", *change)
+		}
+		state = reviewState{Change: *change}
+	}
+	root, prompt, err := e.reviewPrompt(ctx, e.Cwd, state, 1, "")
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	cfg, err := e.resolveConfig(scope.Root, config.Flags{Reviewer: *reviewer})
+	cfg, err := e.resolveConfig(root, config.Flags{Reviewer: *reviewer})
 	if err != nil {
 		return e.errorf("%v", err)
 	}
 	e.warnSame(cfg)
-	prompt, err := review.Prompt(scope)
-	if err != nil {
-		return e.errorf("render prompt: %v", err)
-	}
 	parent := e.session()
 	if parent != "" {
 		// Refuse unquotable paths before leaving a run dir behind. The run dir
 		// lives under the root, so checking the root covers it.
-		if _, err := e.companionCommand("review run", scope.Root); err != nil {
+		if _, err := e.companionCommand("review run", root); err != nil {
 			return e.errorf("%v", err)
 		}
 	}
-	dir, err := rundir.New(scope.Root, rundir.Reviews, e.Now())
+	dir, err := rundir.New(root, rundir.Reviews, e.Now())
 	if err != nil {
 		return e.errorf("create run dir: %v", err)
 	}
 	if err := initRound(dir, 1, prompt); err != nil {
 		return e.errorf("%v", err)
 	}
-	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: cfg.Reviewer, Base: *base}); err != nil {
+	state.Worker = cfg.Reviewer
+	if err := rundir.WriteJSON(dir, workerFile, state); err != nil {
 		return e.errorf("record reviewer: %v", err)
 	}
 	if parent == "" {
@@ -384,11 +398,47 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		return e.errorf("%v", err)
 	}
 	name := fmt.Sprintf("%s-review #%d", cfg.Reviewer.Harness, num)
-	id, err := e.startCompanion(ctx, parent, name, cmd, scope.Root, dir)
+	id, err := e.startCompanion(ctx, parent, name, cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
 	return e.printJSON(startResult{Companion: &id, Dir: dir})
+}
+
+// reviewPrompt collects the scope of a run with state from dir and renders
+// the prompt of round k: the first-round prompt, wrapped for a re-review when
+// the reviewer has a session to resume. A plan review (state.Change set)
+// reads the change from disk; a diff review diffs against state.Base. It
+// returns the repository root with the prompt.
+func (e *Env) reviewPrompt(ctx context.Context, dir string, state reviewState, k int, note string) (string, string, error) {
+	var root, body string
+	if state.Change != "" {
+		scope, err := e.CollectPlan(ctx, dir, state.Change)
+		if err != nil {
+			return "", "", err
+		}
+		root = scope.Root
+		if body, err = review.PlanPrompt(scope); err != nil {
+			return "", "", fmt.Errorf("render prompt: %v", err)
+		}
+	} else {
+		scope, err := e.Collect(ctx, dir, state.Base)
+		if err != nil {
+			return "", "", err
+		}
+		root = scope.Root
+		if body, err = review.Prompt(scope); err != nil {
+			return "", "", fmt.Errorf("render prompt: %v", err)
+		}
+	}
+	if state.Session == "" {
+		return root, body, nil // nothing to resume: start over
+	}
+	prompt, err := review.Rereview(body, k, note)
+	if err != nil {
+		return "", "", fmt.Errorf("render prompt: %v", err)
+	}
+	return root, prompt, nil
 }
 
 // initRound creates rounds/<k>/prompt.md and records k as the current round.
@@ -484,18 +534,9 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 			return e.errorf("%s: not a pane id: %q", filepath.Join(run.dir, paneFile), pane)
 		}
 	}
-	scope, err := e.Collect(ctx, run.root, run.state.Base)
+	_, prompt, err := e.reviewPrompt(ctx, run.root, run.state, k+1, note)
 	if err != nil {
 		return e.errorf("%v", err)
-	}
-	var prompt string
-	if run.state.Session != "" {
-		prompt, err = review.RereviewPrompt(scope, k+1, note)
-	} else {
-		prompt, err = review.Prompt(scope) // nothing to resume: start over
-	}
-	if err != nil {
-		return e.errorf("render prompt: %v", err)
 	}
 	if err := initRound(run.dir, k+1, prompt); err != nil {
 		return e.errorf("%v", err)

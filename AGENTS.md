@@ -11,7 +11,9 @@ visible terminal companion:
 - the **applier** (`agk apply`): an interactive, autonomous claude or codex session that implements
   an OpenSpec change and later fixes findings it is sent, reporting each round in a file;
 - the **reviewer** (`agk review`): a read-only codex or claude review of the diff with structured
-  findings, kept alive between rounds so re-reviews resume its session.
+  findings. In agterm it is an interactive harness session you can talk to: it writes its findings to
+  a file that `agk review wait` validates, and a re-review is typed into the same live session.
+  Outside agterm it runs headless and inline (`codex exec` / `claude -p` with the bundled schema).
 
 The reviewer also reviews plans: `agk review start --change <name>` checks an OpenSpec change's
 artifacts instead of a diff. The `agk-propose` skill (`/agk-propose`) runs the plan step around it:
@@ -45,10 +47,14 @@ agk apply wait <dir>                         # {"status":"done|blocked|needs-hum
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
 agk review start [--base main | --change <change>] [--reviewer H[:M]]
-                                             # reviewer companion; prints {"companion","dir"};
+                                             # reviewer companion; prints {"companion","dir","started"}
+                                             # (inline: {"companion":null,"dir"});
                                              # --change reviews an OpenSpec change's plan, not a diff
-agk review wait <dir>                        # {"status":"completed|blocked|cancelled|running","round":K,...}
-agk review send <dir> [--note FILE]          # re-review round in the same reviewer session
+agk review wait <dir> [--timeout SECONDS]    # {"status":"completed|blocked|needs-human|cancelled|running","round":K,...}
+                                             # needs-human + reason no-output|permission: the reviewer needs the user
+agk review send <dir> [--note FILE] [--timeout SECONDS]
+                                             # re-review round, typed into the same reviewer session once its turn
+                                             # is over (default 600 s)
 agk review close <dir>
 agk config                                   # resolved workers and the source of every value
 agk setup [--skills-dir DIR] [--dry-run]
@@ -64,25 +70,27 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-revi
 | Path | Purpose |
 |------|---------|
 | `cmd/agk/` | CLI entry point and subcommands |
-| `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`: companions, status, wait, type, text, mailbox) and a fake for tests |
+| `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`: companions, status, info, wait, type, text) and a fake for tests |
 | `internal/config/` | Worker configuration: TOML layers, flags, resolution with per-key sources |
-| `internal/harness/` | `Driver` per harness (claude, codex): interactive applier argv, headless applier turn, structured review turn; event-stream rendering; `RunStreaming` |
+| `internal/harness/` | `Driver` per harness (claude, codex): interactive applier and reviewer argv, headless applier turn, structured inline review turn; reviewer `extra_args` guard; event-stream rendering; `RunStreaming` |
 | `internal/rundir/` | `.agk/<kind>/<run>/` directories: numbering, rounds, `worker.json` |
 | `internal/apply/` | Applier prompts and rules, round report validation, wait decision, openspec state |
-| `internal/review/` | Review scope from git, prompts, review JSON parse/validate, status lines |
-| `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Driver, Collect, clock, ...) |
+| `internal/review/` | Review scope from git, prompts (with the output-file variant) and the fix-up prompt, review JSON parse/validate, wait decision (`Decide`), info lines |
+| `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Driver, Collect, clock, ...); `worker.go` holds the plumbing both workers share (start handshake, sliced waits, typing a line once the turn is over) |
 | `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
 | `internal/setup/` | `agk setup`: skills dir resolution, link/ignore/dependency plan, apply |
 | `internal/termsafe/` | Keeps untrusted model output from driving a terminal: control characters and bidi overrides become visible escapes |
 | `internal/buildinfo/` | `Version`, stamped with `-ldflags -X` at release |
-| `assets/` | Embedded files: review schema and prompts, applier prompts and rules, claude deny settings, reviewer tool list |
+| `assets/` | Embedded files: review schema and prompts (incl. the fix-up prompt), applier prompts and rules, claude deny settings, reviewer tool list |
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
 | `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
 | `scripts/` | `release.sh`: tag a version and bump the tap formula; `eval-skills.sh`: run the skill evals |
 | `evals/` | Eval suite of the `agk-propose` skill for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
-`rounds/<k>/` per round (gitignored here).
+`rounds/<k>/` per round (gitignored here). An interactive review run also holds `schema.json`, the
+reviewer's only writable directory `out/` (it writes `out/<k>.json`) and, for claude,
+`reviewer-settings.json`.
 
 ## Conventions
 
@@ -94,12 +102,18 @@ Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/
   hooks: `$AGTERMCTL`, the app bundle, then PATH.
 - A companion's `$AGTERM_SESSION_ID` is its own id. `--command` runs in the user's login shell
   (fish), so values with `\` or newlines are refused rather than quoted (paths, config values).
-- Worker state lives on disk (`worker.json`, `round`, `rounds/<k>/result.json` or `report.json`);
-  agterm status is only the wake-up signal. A run is pinned to the configuration it started with.
-- The reviewer child runs without `AGTERM_*` variables so its own agterm status hooks cannot mark the
-  companion done before agk has validated the output. The interactive applier keeps them: its hooks
-  are how agk learns that a turn ended.
-- Input reaches a live applier only as one typed line (`Read <prompt file> and follow it.` + Enter),
+- Worker state lives on disk (`worker.json`, `round`, `rounds/<k>/result.json`, `report.json` or the
+  reviewer's `out/<k>.json`); agterm status is only the wake-up signal. A run is pinned to the
+  configuration it started with.
+- The interactive applier and reviewer keep their `AGTERM_*` variables: their harness hooks are how
+  agk learns that a turn ended, and agk never sets a worker companion's agent status itself (it sets
+  only info lines). A claude reviewer runs `--restricted`, which drops the user's hooks, so agk
+  gives it its own through `--settings`: they run the hidden `agk review hook <state>`.
+- The reviewer is read-only by its harness, not its prompt: codex in a `workspace-write` sandbox whose
+  only writable root is `out/`, claude restricted with `Edit(//<out>/**)` as its one write rule
+  (Write rules are not matched). `extra_args` that widen this are refused by `agk review start`, and
+  agk's mandatory flags come after the user's tuning.
+- Input reaches a live worker only as one typed line (`Read <prompt file> and follow it.` + Enter),
   and only when its turn is over and no permission prompt is open.
 - Model output is untrusted: rendered through `termsafe` before it reaches a terminal, never put into
   status markdown beyond fixed strings and counts.

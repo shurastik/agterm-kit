@@ -16,3 +16,14 @@ func TestPlanReviewPromptParses(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewFixupPromptParses(t *testing.T) {
+	if _, err := template.New("fixup").Parse(ReviewFixupPrompt); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"<validator_error>", "{{.Error}}", "{{.Out}}", "{{.Schema}}", "Do not run `agk`"} {
+		if !strings.Contains(ReviewFixupPrompt, want) {
+			t.Errorf("fix-up prompt lacks %q", want)
+		}
+	}
+}

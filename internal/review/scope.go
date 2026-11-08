@@ -32,17 +32,26 @@ func diffArgs(mergeBase string, extra ...string) []string {
 	return append(args, mergeBase, "--", ".", ":(exclude)"+agkDir)
 }
 
-// ReadRestCommand is the shell command that reproduces the review diff.
-func ReadRestCommand(mergeBase string) string {
+// ReadRestCommand is the shell command that reproduces the review diff. A
+// non-empty root renders `git -C <root> diff …`, for a reviewer whose working
+// directory is not the repository.
+func ReadRestCommand(mergeBase, root string) string {
 	parts := []string{"git"}
+	if root != "" {
+		parts = append(parts, "-C", shellWord(root))
+	}
 	for _, a := range diffArgs(mergeBase) {
-		if plainArg.MatchString(a) {
-			parts = append(parts, a)
-		} else {
-			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
-		}
+		parts = append(parts, shellWord(a))
 	}
 	return strings.Join(parts, " ")
+}
+
+// shellWord quotes a command line word unless it is plain.
+func shellWord(a string) string {
+	if plainArg.MatchString(a) {
+		return a
+	}
+	return "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 }
 
 var plainArg = regexp.MustCompile(`^[A-Za-z0-9._/=-]+$`)

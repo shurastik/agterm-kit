@@ -18,7 +18,6 @@ import (
 	"github.com/shurastik/agterm-kit/internal/fsx"
 	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/rundir"
-	"github.com/shurastik/agterm-kit/internal/termsafe"
 )
 
 // Run-dir files of an apply run.
@@ -26,15 +25,12 @@ const (
 	settingsFile = "claude-settings.json"
 	rulesFile    = "applier-rules.md"
 	applierLog   = "applier.log"
-	startedFile  = "started" // in rounds/<k>/: the round was seen active
 )
 
 // Timeouts of the applier commands.
 const (
-	defaultApplyWait = 3600             // apply wait, seconds
-	defaultApplySend = 600              // apply send waiting for the turn to end, seconds
-	startHandshake   = 60 * time.Second // companion must report a status by then
-	handshakeLines   = 20               // screen lines shown when it does not
+	defaultApplyWait = 3600 // apply wait, seconds
+	defaultApplySend = 600  // apply send waiting for the turn to end, seconds
 )
 
 // applyState is worker.json of an apply run.
@@ -189,40 +185,11 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	started := e.handshake(ctx, id)
+	started := e.handshake(ctx, applierWorker, id)
 	if started {
 		markStarted(dir, 1)
 	}
 	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: started})
-}
-
-// markStarted records that round k was seen active, so a later idle status
-// means its turn is over rather than not begun.
-func markStarted(dir string, k int) {
-	_ = fsx.ReplaceFile(filepath.Join(rundir.RoundDir(dir, k), startedFile), nil, 0o644)
-}
-
-func roundStarted(dir string, k int) bool {
-	_, err := os.Stat(filepath.Join(rundir.RoundDir(dir, k), startedFile))
-	return err == nil
-}
-
-// handshake waits for the new applier to report any agent status. When none
-// comes (a trust prompt, a login screen, a bad flag), it shows the last
-// screen lines and leaves the companion open for the user.
-func (e *Env) handshake(ctx context.Context, id string) bool {
-	_, err := e.Ctl.Wait(ctx, id, []string{"active", "completed", "blocked"}, startHandshake)
-	if err == nil {
-		return true
-	}
-	fmt.Fprintf(e.Stderr, "agk: warning: applier %s did not start (%v); it is waiting in its companion:\n", id, err)
-	if !errors.Is(err, agterm.ErrGone) {
-		if screen, terr := e.Ctl.Text(ctx, id, handshakeLines); terr == nil {
-			w := termsafe.NewWriter(e.Stderr)
-			io.WriteString(w, strings.TrimRight(screen, "\n")+"\n")
-		}
-	}
-	return false
 }
 
 // headlessRound runs round k of an apply run in the foreground (outside
@@ -276,6 +243,11 @@ func loadApplyRun(dir string) (applyRun, error) {
 	return r, nil
 }
 
+// reportPath is where the applier writes round k's report.
+func reportPath(dir string, k int) string {
+	return filepath.Join(rundir.RoundDir(dir, k), apply.ReportFile)
+}
+
 // readReport returns round k's report bytes, or nil when there is none yet.
 func readReport(dir string, k int) ([]byte, error) {
 	b, err := os.ReadFile(filepath.Join(rundir.RoundDir(dir, k), apply.ReportFile))
@@ -283,39 +255,6 @@ func readReport(dir string, k int) ([]byte, error) {
 		return nil, nil
 	}
 	return b, err
-}
-
-// pollSlice is how long one status wait lasts before the state on disk is
-// checked again: files decide even when a harness's agent-status hooks never
-// fire.
-var pollSlice = 5 * time.Second
-
-// waitPolling waits up to left for one of until, in pollSlice slices,
-// returning early with found when done reports true between slices. It
-// returns the unused budget.
-func (e *Env) waitPolling(ctx context.Context, companion string, until []string, left time.Duration, done func() bool) (status string, err error, found bool, rest time.Duration) {
-	for {
-		slice := min(pollSlice, left)
-		status, err = e.Ctl.Wait(ctx, companion, until, slice)
-		if !errors.Is(err, agterm.ErrTimeout) {
-			return status, err, false, left
-		}
-		left -= slice
-		if done() {
-			return "", nil, true, left
-		}
-		if left <= 0 {
-			return "", err, false, 0
-		}
-	}
-}
-
-// waitSliced is waitPolling until round k's report appears.
-func (e *Env) waitSliced(ctx context.Context, companion string, until []string, left time.Duration, dir string, k int) (string, error, bool, time.Duration) {
-	return e.waitPolling(ctx, companion, until, left, func() bool {
-		r, _ := readReport(dir, k)
-		return r != nil
-	})
 }
 
 // ApplyWait implements `agk apply wait <run-dir> [--timeout SECONDS]`.
@@ -352,14 +291,14 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 		if run.round == 1 {
 			until = append(until, "completed")
 		}
-		status, werr, found, left = e.waitSliced(ctx, companion, until, left, run.dir, run.round)
+		status, werr, found, left = e.waitSliced(ctx, companion, until, left, reportPath(run.dir, run.round))
 		if status == "active" {
 			markStarted(run.dir, run.round)
 			status = ""
 		}
 	}
 	if !found && werr == nil && status == "" {
-		status, werr, _, _ = e.waitSliced(ctx, companion, []string{"completed", "blocked", "idle"}, left, run.dir, run.round)
+		status, werr, _, _ = e.waitSliced(ctx, companion, []string{"completed", "blocked", "idle"}, left, reportPath(run.dir, run.round))
 	}
 	if werr != nil && !errors.Is(werr, agterm.ErrGone) && !errors.Is(werr, agterm.ErrTimeout) {
 		return e.errorf("wait for applier %s: %v", companion, werr)
@@ -411,20 +350,6 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	if companion != "" {
-		status, err := e.Ctl.Wait(ctx, companion, []string{"completed", "blocked", "idle"}, time.Duration(*timeout)*time.Second)
-		switch {
-		case errors.Is(err, agterm.ErrGone):
-			return e.errorf("the applier %s is gone; start a new apply run", companion)
-		case errors.Is(err, agterm.ErrTimeout):
-			return e.errorf("the applier %s is busy: its turn did not end within %d s", companion, *timeout)
-		case err != nil:
-			return e.errorf("wait for applier %s: %v", companion, err)
-		case status == "blocked":
-			// A permission prompt is open: typed text would answer it.
-			return e.errorf("the applier %s waits for the user (permission prompt); answer it in the companion first", companion)
-		}
-	}
 	k := run.round + 1
 	report := filepath.Join(rundir.RoundDir(run.dir, k), apply.ReportFile)
 	prompt, err := apply.FixPrompt(k, string(msg), report, inlineRules(run.state.Worker))
@@ -450,19 +375,12 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 		}
 		return code
 	}
-	if err := e.Ctl.Type(ctx, companion, line+"\r"); err != nil {
-		if rerr := rundir.SetRound(run.dir, run.round); rerr != nil {
-			fmt.Fprintf(e.Stderr, "agk: warning: %v\n", rerr)
-		}
-		os.RemoveAll(rundir.RoundDir(run.dir, k))
-		if errors.Is(err, agterm.ErrGone) {
-			return e.errorf("the applier %s is gone; start a new apply run", companion)
-		}
-		return e.errorf("type into applier %s: %v", companion, err)
+	started, err := e.typeWhenIdle(ctx, applierWorker, companion, line, fmt.Sprintf("round %d", k), time.Duration(*timeout)*time.Second, time.Time{})
+	if err != nil {
+		rollbackRound(run.dir, run.round, k, e.Stderr)
+		return e.errorf("%v", err)
 	}
-	if _, err := e.Ctl.Wait(ctx, companion, []string{"active"}, sendHandshake); err != nil {
-		fmt.Fprintf(e.Stderr, "agk: warning: applier %s did not report round %d as started: %v\n", companion, k, err)
-	} else {
+	if started {
 		markStarted(run.dir, k)
 	}
 	return e.printJSON(sendRound{Round: k})

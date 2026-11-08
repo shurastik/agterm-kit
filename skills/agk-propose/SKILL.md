@@ -45,8 +45,9 @@ artifacts; a passing round counts only for the files that still match its manife
    m=$(mktemp "${TMPDIR:-/tmp}/agk-plan-sha.XXXXXX") && find openspec/changes/<change> -type f -print0 | sort -z | xargs -0 shasum > "$m" && echo "$m"
    agk review start --change <change>
    ```
-   - stdout: `{"companion":"<id>","dir":"<run dir>"}`. Keep `dir` for every later step, and move
-     the manifest into it: `mv <temp file> <dir>/pending.sha`.
+   - stdout: `{"companion":"<id>","dir":"<run dir>","started":true}`. Keep `dir` for every later
+     step, and move the manifest into it: `mv <temp file> <dir>/pending.sha`. `"started":false`:
+     see the `agk-review` skill (usually a trust prompt the user answers in the companion).
    - `nothing to review` (exit 1): the change has no files. Go back to step 1.
    - Any other exit 1 (unknown change, invalid name): report the error and stop.
    - Outside agterm `companion` is `null` and round 1 already ran inline; still run the wait.
@@ -54,8 +55,9 @@ artifacts; a passing round counts only for the files that still match its manife
    ```bash
    agk review wait <dir>
    ```
-   Branch on `status` exactly as the `agk-review` skill says (`completed`, `blocked`, `cancelled`,
-   `running`).
+   Branch on `status` exactly as the `agk-review` skill says (`completed`, `blocked`, `needs-human`,
+   `cancelled`, `running`). On `needs-human` the reviewer waits for the user (a question or a
+   permission prompt in its companion): tell them, then run the wait again.
 3. Act on `<dir>/rounds/<round>/review.json`:
    - verdict `approve` with no findings, or only findings the user explicitly set aside: the
      reviewer has passed the artifacts its round saw. Check that they are still the current ones:

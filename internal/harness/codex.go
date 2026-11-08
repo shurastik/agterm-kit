@@ -40,6 +40,21 @@ func (c *Codex) Interactive(w config.Worker, root string, _ ApplierFiles, _, kic
 	return append(argv, kickoff)
 }
 
+// InteractiveReviewer runs codex in a workspace-write sandbox whose only
+// writable root is out (the working directory): configured extra roots are
+// reset and the tmp roots excluded. Approvals are off, so a command that needs
+// to leave the sandbox fails. The mandatory flags come after the tuning, so a
+// later user -c cannot widen them.
+func (c *Codex) InteractiveReviewer(w config.Worker, _, out string, _ ReviewerFiles, _, kickoff string) []string {
+	argv := append([]string{c.Bin}, codexTuning(w)...)
+	return append(argv,
+		"--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", out,
+		"-c", "sandbox_workspace_write.writable_roots=[]",
+		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+		kickoff)
+}
+
 // codexArgs is `exec` with a sandbox, or `exec <tuning> resume <thread>`
 // keeping it; exec-level options must precede the resume subcommand, which
 // rejects some of them (--profile). out are the output flags.

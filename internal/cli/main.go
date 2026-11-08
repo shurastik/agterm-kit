@@ -10,18 +10,20 @@ const usage = `agk - agterm workflow kit
 Usage:
   agk review start [--base REF | --change NAME] [--reviewer H[:M]]
                                   Review changes since the merge base of REF (default main) in a
-                                  <harness>-review companion; prints {"companion","dir"}.
+                                  <harness>-review companion, an interactive reviewer session you can
+                                  talk to; prints {"companion","dir","started"}.
                                   --change reviews the planning artifacts of OpenSpec change NAME
                                   (and the main specs its deltas touch) instead of a diff.
                                   Outside agterm the review runs inline (companion null).
-  agk review run <run-dir>        The reviewer loop inside the companion (runs rounds on request).
   agk review wait <run-dir> [--timeout SECONDS]
                                   Wait for the current round's outcome (default 1800 s) and print it
-                                  as {"status":"completed|blocked|cancelled|running","round":K,...}.
-  agk review send <run-dir> [--note FILE]
-                                  Start the next round: re-review the current diff (or the change's
-                                  artifacts) in the same reviewer session; prints
-                                  {"companion","dir","round"}.
+                                  as {"status":"completed|blocked|needs-human|cancelled|running","round":K,...}.
+                                  needs-human has a reason: no-output (the reviewer ended its turn
+                                  without writing its review) or permission (it asks for an answer).
+  agk review send <run-dir> [--note FILE] [--timeout SECONDS]
+                                  Start the next round once the reviewer's turn is over (default
+                                  600 s): re-review the current diff (or the change's artifacts) in
+                                  the same reviewer session; prints {"companion","dir","round"}.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
   agk apply start <change> [--applier H[:M]]
                                   Start the applier for an OpenSpec change in a <harness>-apply
@@ -49,9 +51,8 @@ Exit codes: 0 ok, 1 error (2 and 3 are reserved).
 
 const reviewUsage = `Usage:
   agk review start [--base REF | --change NAME] [--reviewer H[:M]]   REF defaults to main
-  agk review run <run-dir>
   agk review wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 1800
-  agk review send <run-dir> [--note FILE]
+  agk review send <run-dir> [--note FILE] [--timeout SECONDS]   SECONDS defaults to 600
   agk review close <run-dir>
 `
 
@@ -91,8 +92,8 @@ func (e *Env) reviewCmd(ctx context.Context, args []string) int {
 		return ExitOK
 	case "start":
 		return e.ReviewStart(ctx, args[1:])
-	case "run":
-		return e.ReviewRun(ctx, args[1:])
+	case "hook":
+		return e.ReviewHook(ctx, args[1:])
 	case "wait":
 		return e.ReviewWait(ctx, args[1:])
 	case "send":

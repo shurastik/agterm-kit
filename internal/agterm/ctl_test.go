@@ -48,7 +48,7 @@ func assertArgs(t *testing.T, s *stubExec, want []string) {
 
 func TestNewCompanion(t *testing.T) {
 	s := &stubExec{stdout: `{"ok":true,"result":{"id":"C-1","parent":"P-1"}}`}
-	id, err := newCLI(s).NewCompanion(context.Background(), "P-1", "codex-review", "'/bin/agk' review run '/r'", "/repo")
+	id, err := newCLI(s).NewCompanion(context.Background(), "P-1", "codex-review", "'/bin/agk' review hook 'active'", "/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestNewCompanion(t *testing.T) {
 	}
 	assertArgs(t, s, []string{"session", "new",
 		"--parent", "P-1",
-		"--command", "'/bin/agk' review run '/r'",
+		"--command", "'/bin/agk' review hook 'active'",
 		"--wait", "--no-select",
 		"--name", "codex-review",
 		"--cwd", "/repo",

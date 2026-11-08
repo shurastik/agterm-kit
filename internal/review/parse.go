@@ -1,4 +1,5 @@
-// Package review runs a codex review of a git diff and validates its output.
+// Package review builds the prompts of a code or plan review and validates the
+// reviewer's structured output.
 package review
 
 import (

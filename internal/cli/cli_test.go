@@ -37,6 +37,10 @@ func (f *fakeDriver) Interactive(w config.Worker, root string, files harness.App
 	return []string{f.name, "--model=" + w.Model, "--session=" + session, kickoff}
 }
 
+func (f *fakeDriver) InteractiveReviewer(w config.Worker, root, out string, files harness.ReviewerFiles, session, kickoff string) []string {
+	return []string{f.name, "review", "--model=" + w.Model, "--root=" + root, "--out=" + out, "--settings=" + files.Settings, "--session=" + session, kickoff}
+}
+
 func (f *fakeDriver) pick(i int, t harness.Turn) (string, error) {
 	var err error
 	if i < len(f.errs) {
@@ -131,7 +135,7 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 	return h
 }
 
-// runDir makes a codex review run <root>/.agk/reviews/<ts>/ at round 1 with
+// runDir makes a codex review <root>/.agk/reviews/<ts>/ at round 1 with
 // rounds/1/prompt.md and returns root and dir.
 func runDir(t *testing.T) (string, string) {
 	t.Helper()

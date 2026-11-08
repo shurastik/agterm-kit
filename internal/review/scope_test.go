@@ -429,3 +429,51 @@ func TestCollectPlanListsSymlinkedMainSpecDir(t *testing.T) {
 		})
 	}
 }
+
+func TestReadRestCommandPlainAndWithRoot(t *testing.T) {
+	plain := ReadRestCommand("abc123", "")
+	if !strings.HasPrefix(plain, "git diff ") || strings.Contains(plain, " -C ") {
+		t.Fatalf("plain = %q", plain)
+	}
+	if got := ReadRestCommand("abc123", "/repo"); got != "git -C /repo "+strings.TrimPrefix(plain, "git ") {
+		t.Fatalf("with root = %q", got)
+	}
+	if got := ReadRestCommand("abc123", "/my repo"); !strings.HasPrefix(got, "git -C '/my repo' diff ") {
+		t.Fatalf("root with a space must be quoted: %q", got)
+	}
+}
+
+// The codex reviewer runs from <run>/out, so the pathspec `.` of the read-rest
+// command would mean out/ without -C. With -C it reproduces the repository diff.
+func TestReadRestCommandFromSubdirReproducesRepoDiff(t *testing.T) {
+	dir := gitRepo(t)
+	git(t, dir, "checkout", "-qb", "feat")
+	write(t, dir, "b.go", "package a\n\nfunc Committed() {}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "b")
+	write(t, dir, "a.go", "package a\n\nfunc Uncommitted() {}\n")
+	sub := filepath.Join(dir, ".agk", "reviews", "r", "out")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(cmdline string) string {
+		cmd := exec.Command("sh", "-c", cmdline)
+		cmd.Dir = sub
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", cmdline, err, out)
+		}
+		return string(out)
+	}
+	if got := run(ReadRestCommand(s.MergeBase, dir)); got != s.Diff {
+		t.Fatalf("diff from out/ with -C differs from the repository diff:\n%s\nwant\n%s", got, s.Diff)
+	}
+	if got := run(ReadRestCommand(s.MergeBase, "")); got == s.Diff {
+		t.Fatal("without -C the pathspec is relative to out/: the control case must differ")
+	}
+}

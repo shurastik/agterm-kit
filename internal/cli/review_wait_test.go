@@ -8,9 +8,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
+	"github.com/shurastik/agterm-kit/internal/config"
 	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
@@ -19,7 +21,8 @@ const (
 	blockedResult   = `{"status":"blocked","round":1,"reason":"codex failed","findings":0}`
 )
 
-// waitDir makes a run dir with an optional companion file and result.json.
+// waitDir makes a (non-interactive) run dir with an optional companion file
+// and result.json.
 func waitDir(t *testing.T, companion, result string) string {
 	t.Helper()
 	_, dir := runDir(t)
@@ -55,84 +58,303 @@ func assertCalls(t *testing.T, f *agtermtest.Fake, want ...agtermtest.Call) {
 	}
 }
 
-var (
-	waitCall = agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "30m0s"}}
-)
+// idir makes an interactive review at round 1 with companion C-1, out/
+// and schema.json, as `review start` leaves it. The round counts as started.
+func idir(t *testing.T) string {
+	t.Helper()
+	_, dir := runDir(t)
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: config.Codex}, Base: "main", Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "companion"), []byte("C-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepareOut(dir); err != nil {
+		t.Fatal(err)
+	}
+	markStarted(dir, 1)
+	return dir
+}
 
-func TestReviewWaitCompleted(t *testing.T) {
+func writeOut(t *testing.T, dir string, k int, content string) {
+	t.Helper()
+	if err := os.WriteFile(outputPath(dir, k), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// noStatus fails when agk set the reviewer companion's agent status: it
+// belongs to the harness.
+func noStatus(t *testing.T, h *tenv) {
+	t.Helper()
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Status" {
+			t.Fatalf("agk set an agent status: %v", h.ctl.Calls)
+		}
+	}
+}
+
+func infos(h *tenv) []string {
+	var out []string
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Info" {
+			out = append(out, c.Args[1])
+		}
+	}
+	return out
+}
+
+func typed(h *tenv) []string {
+	var out []string
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Type" {
+			out = append(out, c.Args[1])
+		}
+	}
+	return out
+}
+
+func mainWait(timeout string) agtermtest.Call {
+	return agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", timeout}}
+}
+
+func TestReviewWaitValidOutputMidTurnCompletes(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
-	h.ctl.WaitStatus = "completed"
-	// The review finishes while agk waits.
-	h.ctl.OnWait = func() { writeResultFile(t, dir, completedResult) }
+	dir := idir(t)
+	h.ctl.WaitStatus, h.ctl.WaitErr = "", agterm.ErrTimeout // the turn keeps running
+	h.ctl.OnWait = func() { writeOut(t, dir, 1, threeFindings) }
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if h.out.String() != completedResult+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, waitCall) // the reviewer stays for the next round
-	if h.err.Len() != 0 {
-		t.Fatalf("stderr = %q", h.err)
+	rd := rundir.RoundDir(dir, 1)
+	assertResult(t, rd, "completed", 3)
+	if !exists(filepath.Join(rd, "review.json")) {
+		t.Fatal("review.json missing")
 	}
+	assertCalls(t, h.ctl,
+		mainWait("30m0s"),
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}},
+	)
+	noStatus(t, h)
 }
 
-func TestReviewWaitBlockedKeepsCompanion(t *testing.T) {
+func TestReviewWaitValidOutputAlreadyThereNeedsNoWait(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
-	h.ctl.WaitStatus = "blocked"
-	h.ctl.OnWait = func() { writeResultFile(t, dir, blockedResult) }
+	dir := idir(t)
+	writeOut(t, dir, 1, approve)
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != blockedResult+"\n" {
+	if h.out.String() != `{"status":"completed","round":1,"findings":0,"verdict":"approve"}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, waitCall)
+	// agterm may have reset a completed status: waiting would hang.
+	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Info"}) {
+		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
+	if got := infos(h); len(got) != 1 || got[0] != `codex #1 r1: ^[approve](color: "green"), no findings` {
+		t.Fatalf("infos = %q", got)
+	}
 }
 
-func TestReviewWaitBlockedWithoutResult(t *testing.T) {
+func TestReviewWaitCompletedTurnWithValidOutput(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
-	h.ctl.WaitStatus = "blocked"
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != `{"status":"blocked","round":1}`+"\n" {
-		t.Fatalf("stdout = %q", h.out)
-	}
-	assertCalls(t, h.ctl, waitCall)
-}
-
-func TestReviewWaitCompletedWithoutResultIsAnError(t *testing.T) {
-	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
+	dir := idir(t)
 	h.ctl.WaitStatus = "completed"
-	if code := runWait(h, dir); code != 1 {
-		t.Fatalf("exit %d, want 1", code)
+	h.ctl.OnWait = func() { writeOut(t, dir, 1, threeFindings) }
+	if code := runWait(h, dir); code != 0 || h.out.String() != completedResult+"\n" {
+		t.Fatalf("exit %d stdout %q stderr %q", code, h.out, h.err)
 	}
-	if h.out.Len() != 0 || !strings.Contains(h.err.String(), "result.json") {
-		t.Fatalf("stdout %q stderr %q", h.out, h.err)
-	}
-	assertCalls(t, h.ctl, waitCall)
+	noStatus(t, h)
 }
 
-func TestReviewWaitCancelled(t *testing.T) {
+func TestReviewWaitInvalidOutputGetsOneFixupThenCompletes(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
-	h.ctl.WaitErr = agterm.ErrGone
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	rd := rundir.RoundDir(dir, 1)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Status: "completed"}, // the turn ends with an invalid file
+		{Status: "idle"},      // typeWhenIdle: the turn is over
+		{Status: "active"},    // the fix-up turn starts
+	}
+	h.ctl.OnType = func(_, _ string) { writeOut(t, dir, 1, threeFindings) }
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != `{"status":"cancelled","round":1}`+"\n" {
+	if h.out.String() != completedResult+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, waitCall)
+	fix := filepath.Join(rd, "fixup-1.md")
+	if got := typed(h); !reflect.DeepEqual(got, []string{"Read " + fix + " and follow it.\r"}) {
+		t.Fatalf("typed = %q", got)
+	}
+	p := readFile(t, fix)
+	if !strings.Contains(p, "verdict") || !strings.Contains(p, outputPath(dir, 1)) || !strings.Contains(p, filepath.Join(dir, "schema.json")) {
+		t.Fatalf("fix-up prompt = %q", p)
+	}
+	if readFile(t, filepath.Join(rd, "fixups")) != "1\n" || !exists(fix+".started") {
+		t.Fatal("the attempt and its start must be recorded")
+	}
+	noStatus(t, h)
 }
 
-func TestReviewWaitRunning(t *testing.T) {
+func TestReviewWaitThreeInvalidOutputsBlockTheRound(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
+	dir := idir(t)
+	const bad = `{"verdict":"maybe"}`
+	writeOut(t, dir, 1, bad)
+	rd := rundir.RoundDir(dir, 1)
+	h.ctl.WaitStatus = "completed" // every turn ends at once; every fix-up turn starts
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Status: "completed"},                                       // turn 1 over
+		{Status: "idle"}, {Status: "active"}, {Status: "completed"}, // fix-up 1 typed, started, over
+		{Status: "idle"}, {Status: "active"}, // fix-up 2 typed, started
+	}
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	want := `{"status":"blocked","round":1,"reason":"invalid review output","findings":0}` + "\n"
+	if h.out.String() != want {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if got := len(typed(h)); got != 2 {
+		t.Fatalf("fix-ups typed = %d, want 2", got)
+	}
+	if readFile(t, filepath.Join(rd, "output.json")) != bad {
+		t.Fatal("the raw output must be kept")
+	}
+	if exists(filepath.Join(rd, "review.json")) {
+		t.Fatal("review.json must not be written")
+	}
+	assertResult(t, rd, "blocked", 0)
+	if got := infos(h); !reflect.DeepEqual(got, []string{"codex #1 r1: invalid review output"}) {
+		t.Fatalf("infos = %q", got)
+	}
+	noStatus(t, h)
+}
+
+func TestReviewWaitInvalidFileOutlastingTimeoutGivesRunning(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict": "needs-att`) // half written, the turn keeps running
+	pollSlice = 5 * 1e9
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runWait(h, dir, "--timeout", "12"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	assertCalls(t, h.ctl, mainWait("5s"), mainWait("5s"), mainWait("2s"))
+	if exists(filepath.Join(rundir.RoundDir(dir, 1), "result.json")) || len(typed(h)) != 0 {
+		t.Fatal("nothing may be recorded or typed")
+	}
+}
+
+func TestReviewWaitNoOutputNeedsHuman(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	h.ctl.WaitStatus = "completed"
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"needs-human","round":1,"reason":"no-output"}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if exists(filepath.Join(rundir.RoundDir(dir, 1), "result.json")) {
+		t.Fatal("no result.json for needs-human")
+	}
+	noStatus(t, h)
+}
+
+func TestReviewWaitPermissionNeedsHuman(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	h.ctl.WaitStatus = "blocked"
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"needs-human","round":1,"reason":"permission"}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if exists(filepath.Join(rundir.RoundDir(dir, 1), "result.json")) {
+		t.Fatal("no result.json for needs-human")
+	}
+	assertCalls(t, h.ctl, mainWait("30m0s"))
+}
+
+func TestReviewWaitSecondWaitAfterNeedsHumanCompletes(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	h.ctl.WaitStatus = "completed"
+	runWait(h, dir)
+	if !strings.Contains(h.out.String(), "needs-human") {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	// The user talks the reviewer into writing its review.
+	h.out.Reset()
+	h.ctl.Calls = nil
+	writeOut(t, dir, 1, threeFindings)
+	if code := runWait(h, dir); code != 0 || h.out.String() != completedResult+"\n" {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	assertResult(t, rundir.RoundDir(dir, 1), "completed", 3)
+}
+
+// fixup1Unconfirmed makes a run whose fix-up 1 was typed without `active`
+// being seen afterwards, over an invalid file.
+func fixup1Unconfirmed(t *testing.T, content string) (dir string) {
+	t.Helper()
+	dir = idir(t)
+	writeOut(t, dir, 1, content)
+	rd := rundir.RoundDir(dir, 1)
+	if err := os.WriteFile(filepath.Join(rd, "fixups"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "fixup-1.md"), []byte("fix"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+var activeBlocked = func(timeout string) agtermtest.Call {
+	return agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,blocked", timeout}}
+}
+
+func TestReviewWaitUnconfirmedFixupTypesNoSecondOne(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	// The first wait types fix-up 1; its handshake times out.
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "idle"}, {Err: agterm.ErrTimeout}}
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" || len(typed(h)) != 1 {
+		t.Fatalf("stdout %q typed %q", h.out, typed(h))
+	}
+	rd := rundir.RoundDir(dir, 1)
+	if exists(filepath.Join(rd, "fixup-1.md.started")) {
+		t.Fatal("an unconfirmed fix-up must not be marked started")
+	}
+	// A new wait sees the old `completed` and the unchanged file: no second
+	// fix-up, it waits for `active` and gives running at the timeout.
+	h.out.Reset()
+	h.ctl.Calls = nil
 	h.ctl.WaitErr = agterm.ErrTimeout
 	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
@@ -140,76 +362,171 @@ func TestReviewWaitRunning(t *testing.T) {
 	if h.out.String() != `{"status":"running","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "1m0s"}})
+	assertCalls(t, h.ctl, activeBlocked("1m0s"))
+	if exists(filepath.Join(rd, "result.json")) {
+		t.Fatal("no outcome may be recorded")
+	}
+	noStatus(t, h)
 }
 
-func TestReviewWaitTimeoutButCompleted(t *testing.T) {
+func TestReviewWaitUnconfirmedFixupThenActiveOpensTheGate(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
+	dir := fixup1Unconfirmed(t, `{"verdict":"maybe"}`)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Status: "active"},                   // the fix-up turn starts (gate opens)
+		{Status: "completed"},                // and ends with the file still invalid
+		{Status: "idle"}, {Status: "active"}, // fix-up 2 typed and started
+		{Status: "completed"}, // fix-up 2 turn over, still invalid
+	}
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	rd := rundir.RoundDir(dir, 1)
+	if !exists(filepath.Join(rd, "fixup-1.md.started")) {
+		t.Fatal("fix-up 1 must be marked started once active is seen")
+	}
+	if got := len(typed(h)); got != 1 || !exists(filepath.Join(rd, "fixup-2.md")) {
+		t.Fatalf("typed %d, want exactly fix-up 2", got)
+	}
+	if !strings.Contains(h.out.String(), `"status":"blocked"`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+}
+
+func TestReviewWaitHalfRewrittenFileAfterUnconfirmedFixup(t *testing.T) {
+	h := newHarness(t, true)
+	dir := fixup1Unconfirmed(t, `{"verdict":"maybe"}`)
+	pollSlice = 5 * 1e9
 	h.ctl.WaitErr = agterm.ErrTimeout
-	h.ctl.OnWait = func() { writeResultFile(t, dir, completedResult) }
-	if code := runWait(h, "--timeout", "60", dir); code != 0 {
+	n := 0
+	h.ctl.OnWait = func() {
+		switch n++; n {
+		case 1:
+			writeOut(t, dir, 1, `{"verdict":"needs-attention","summ`) // half-rewritten
+		case 2:
+			writeOut(t, dir, 1, threeFindings)
+		}
+	}
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != completedResult+"\n" {
+	if h.out.String() != completedResult+"\n" || len(typed(h)) != 0 {
+		t.Fatalf("stdout %q typed %q", h.out, typed(h))
+	}
+	assertCalls(t, h.ctl, activeBlocked("5s"), activeBlocked("5s"),
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}})
+}
+
+func TestReviewWaitPermissionDuringUnconfirmedFixup(t *testing.T) {
+	h := newHarness(t, true)
+	dir := fixup1Unconfirmed(t, `{"verdict":"maybe"}`)
+	h.ctl.WaitStatus = "blocked"
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"needs-human","round":1,"reason":"permission"}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Wait"}) {
-		t.Fatalf("calls = %v", h.ctl.Calls)
+	if len(typed(h)) != 0 || exists(filepath.Join(rundir.RoundDir(dir, 1), "result.json")) {
+		t.Fatal("nothing may be typed or recorded")
 	}
 }
 
-func TestReviewWaitGoneButCompletedDoesNotClose(t *testing.T) {
+func TestReviewWaitFixupRefusedIsTakenBack(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "blocked"}} // a prompt opens before typing
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"needs-human","round":1,"reason":"permission"}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	rd := rundir.RoundDir(dir, 1)
+	if n, _ := readFixups(rd); n != 0 || exists(filepath.Join(rd, "fixup-1.md")) || len(typed(h)) != 0 {
+		t.Fatalf("a refused fix-up must leave no trace (count %d)", n)
+	}
+}
+
+func TestReviewWaitCancelledAndRunning(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
 	h.ctl.WaitErr = agterm.ErrGone
-	h.ctl.OnWait = func() { writeResultFile(t, dir, completedResult) }
+	if code := runWait(h, dir); code != 0 || h.out.String() != `{"status":"cancelled","round":1}`+"\n" {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	h = newHarness(t, true)
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 || h.out.String() != `{"status":"running","round":1}`+"\n" {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	assertCalls(t, h.ctl, mainWait("1m0s"))
+}
+
+func TestReviewWaitInfoLineHoldsNoReviewerText(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	evil := strings.Replace(threeFindings, `"title":"a"`, `"title":"\u001b]52;c;ZXZpbA==\u0007 clipboard"`, 1)
+	writeOut(t, dir, 1, evil)
 	if code := runWait(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != completedResult+"\n" {
+	for _, s := range append(infos(h), h.out.String(), h.err.String()) {
+		if strings.ContainsAny(s, "\x1b\x07") || strings.Contains(s, "clipboard") {
+			t.Fatalf("reviewer text leaked: %q", s)
+		}
+	}
+}
+
+func TestReviewWaitRoundStartGate(t *testing.T) {
+	// Round 1 whose start was never confirmed: a fresh session's idle must not
+	// read as "turn over"; the wait begins at active, then waits for the end.
+	h := newHarness(t, true)
+	dir := idir(t)
+	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), startedFile))
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}, {Status: "completed"}}
+	h.ctl.OnWait = func() {
+		if len(h.ctl.Calls) == 2 {
+			writeOut(t, dir, 1, threeFindings)
+		}
+	}
+	if code := runWait(h, dir); code != 0 || h.out.String() != completedResult+"\n" {
+		t.Fatalf("exit %d stdout %q stderr %q", code, h.out, h.err)
+	}
+	if !roundStarted(dir, 1) {
+		t.Fatal("seeing active confirms the round")
+	}
+	assertCalls(t, h.ctl,
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,blocked,completed", "30m0s"}},
+		mainWait("30m0s"),
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}},
+	)
+}
+
+// After `review send`, the companion may still show round 1's completed: the
+// wait must not take it for round 2's outcome.
+func TestReviewWaitSecondRoundIgnoresTheLastRoundsStatus(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, threeFindings)
+	writeResultFile(t, dir, completedResult)
+	rd, _ := rundir.MakeRound(dir, 2)
+	os.WriteFile(filepath.Join(rd, "prompt.md"), []byte("R2"), 0o644)
+	rundir.SetRound(dir, 2)
+	h.ctl.WaitErr = agterm.ErrTimeout
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":2}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, waitCall)
+	assertCalls(t, h.ctl, activeBlocked("1m0s"))
 }
 
-func TestReviewWaitResultAlreadyThere(t *testing.T) {
+func TestReviewWaitOtherWaitErrorExits1(t *testing.T) {
 	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", completedResult)
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != completedResult+"\n" {
-		t.Fatalf("stdout = %q", h.out)
-	}
-	// No wait: a completed status agterm already reset would block it.
-	assertCalls(t, h.ctl)
-}
-
-func TestReviewWaitBlockedResultAlreadyThere(t *testing.T) {
-	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", blockedResult)
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	assertCalls(t, h.ctl)
-}
-
-func TestReviewWaitUserClosedFinishedCompanion(t *testing.T) {
-	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", completedResult)
-	h.ctl.CloseErr = errors.Join(agterm.ErrGone, errors.New("no such session: C-1"))
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != completedResult+"\n" || h.err.Len() != 0 {
-		t.Fatalf("stdout %q stderr %q", h.out, h.err)
-	}
-}
-
-func TestReviewWaitWaitError(t *testing.T) {
-	h := newHarness(t, true)
-	dir := waitDir(t, "C-1\n", "")
+	dir := idir(t)
 	h.ctl.WaitErr = errors.New("socket refused")
 	if code := runWait(h, dir); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
@@ -217,6 +534,42 @@ func TestReviewWaitWaitError(t *testing.T) {
 	if h.out.Len() != 0 || !strings.Contains(h.err.String(), "socket refused") {
 		t.Fatalf("stdout %q stderr %q", h.out, h.err)
 	}
+}
+
+func TestReviewWaitResultAlreadyThere(t *testing.T) {
+	for name, res := range map[string]string{"completed": completedResult, "blocked": blockedResult} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			dir := idir(t)
+			writeResultFile(t, dir, res)
+			if code := runWait(h, dir); code != 0 || h.out.String() != res+"\n" {
+				t.Fatalf("exit %d stdout %q", code, h.out)
+			}
+			assertCalls(t, h.ctl) // result.json decides: no wait
+		})
+	}
+}
+
+// 5.3: a run started by an older agk (companion, no interactive flag).
+func TestReviewWaitOlderRunWithResult(t *testing.T) {
+	h := newHarness(t, true)
+	dir := waitDir(t, "C-1\n", completedResult)
+	if code := runWait(h, dir); code != 0 || h.out.String() != completedResult+"\n" {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	assertCalls(t, h.ctl)
+}
+
+func TestReviewWaitOlderRunWithoutResult(t *testing.T) {
+	h := newHarness(t, true)
+	dir := waitDir(t, "C-1\n", "")
+	if code := runWait(h, dir); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if h.out.Len() != 0 || !strings.Contains(h.err.String(), "older agk") || !strings.Contains(h.err.String(), "new review") {
+		t.Fatalf("stdout %q stderr %q", h.out, h.err)
+	}
+	assertCalls(t, h.ctl) // no Ctl wait call
 }
 
 func TestReviewWaitInline(t *testing.T) {
@@ -287,63 +640,108 @@ func TestReviewHelpListsWait(t *testing.T) {
 	}
 }
 
-// round2Dir is a run at round 2 whose round 1 finished, with companion C-1.
-func round2Dir(t *testing.T) string {
-	t.Helper()
-	dir := waitDir(t, "C-1\n", completedResult)
-	rd, _ := rundir.MakeRound(dir, 2)
-	os.WriteFile(filepath.Join(rd, "prompt.md"), []byte("R2"), 0o644)
-	rundir.SetRound(dir, 2)
-	return dir
+// A lost info-line update is retried, and the outcome is on disk regardless.
+func TestReviewWaitRetriesInfoAndRecordsResult(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, threeFindings)
+	h.ctl.InfoErr = errors.New("socket hiccup")
+	if code := runWait(h, dir); code != 0 || h.out.String() != completedResult+"\n" {
+		t.Fatalf("exit %d stdout %q", code, h.out)
+	}
+	if got := len(infos(h)); got != 3 {
+		t.Fatalf("info attempts = %d, want 3", got)
+	}
+	assertResult(t, rundir.RoundDir(dir, 1), "completed", 3)
+	noStatus(t, h)
 }
 
-// After `review send`, the companion may still show round 1's completed: the
-// wait must not take it for round 2's outcome.
-func TestReviewWaitIgnoresTheLastRoundsStatus(t *testing.T) {
-	h := newHarness(t, true)
-	dir := round2Dir(t)
-	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}, {Status: "completed"}}
-	n := 0
+// ticking makes h.env.Now a controllable clock and every scripted Wait cost
+// the time it was asked to wait when it times out, or cost(call) otherwise.
+func ticking(t *testing.T, h *tenv, cost func(timeout time.Duration, err error) time.Duration) *time.Time {
+	t.Helper()
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.Local)
+	h.env.Now = func() time.Time { return now }
+	waits := 0
 	h.ctl.OnWait = func() {
-		if n++; n == 2 {
-			os.WriteFile(filepath.Join(rundir.RoundDir(dir, 2), "result.json"), []byte(`{"status":"completed","round":2,"findings":0,"verdict":"approve"}`), 0o644)
+		c := h.ctl.Calls[len(h.ctl.Calls)-1]
+		d, err := time.ParseDuration(c.Args[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var werr error
+		if waits < len(h.ctl.WaitSeq) {
+			werr = h.ctl.WaitSeq[0].Err // OnWait runs before the pop
+		} else {
+			werr = h.ctl.WaitErr
+		}
+		waits++
+		now = now.Add(cost(d, werr))
+	}
+	return &now
+}
+
+func waitCost(d time.Duration, err error) time.Duration {
+	if errors.Is(err, agterm.ErrTimeout) {
+		return d
+	}
+	return 0
+}
+
+// One deadline for the whole wait: a finished turn with invalid output and a
+// fix-up that never shows `active` must not run past --timeout.
+func TestReviewWaitFixupHandshakeIsCappedByTheDeadline(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "idle"}, {Err: agterm.ErrTimeout}}
+	h.ctl.WaitErr = agterm.ErrTimeout
+	now := ticking(t, h, waitCost)
+	start := *now
+	if code := runWait(h, dir, "--timeout", "1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if spent := now.Sub(start); spent > time.Second {
+		t.Fatalf("the wait spent %v of a 1 s budget", spent)
+	}
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Wait" {
+			if d, _ := time.ParseDuration(c.Args[2]); d > time.Second {
+				t.Fatalf("a wait asked for %v: %v", d, c)
+			}
 		}
 	}
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
+	if len(typed(h)) != 1 {
+		t.Fatalf("typed = %q", typed(h))
 	}
-	if !strings.Contains(h.out.String(), `"round":2`) || !strings.Contains(h.out.String(), "approve") {
-		t.Fatalf("stdout = %q", h.out)
+}
+
+// A status wait that took time leaves less for the next one.
+func TestReviewWaitSuccessfulWaitsSpendTheBudget(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	os.Remove(filepath.Join(rundir.RoundDir(dir, 1), startedFile))
+	// The first wait returns `active` after 40 s.
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}}
+	h.ctl.WaitErr = agterm.ErrTimeout
+	n := 0
+	ticking(t, h, func(d time.Duration, err error) time.Duration {
+		if n++; n == 1 {
+			return 40 * time.Second
+		}
+		return waitCost(d, err)
+	})
+	if code := runWait(h, dir, "--timeout", "100"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	assertCalls(t, h.ctl,
-		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "30m0s"}},
-		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked", "30m0s"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,blocked,completed", "1m40s"}},
+		mainWait("1m0s"),
 	)
-}
-
-func TestReviewWaitRoundNeverStarts(t *testing.T) {
-	h := newHarness(t, true)
-	dir := round2Dir(t)
-	h.ctl.WaitErr = agterm.ErrTimeout
-	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != `{"status":"running","round":2}`+"\n" {
+	if h.out.String() != `{"status":"running","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "1m0s"}})
-}
-
-func TestReviewWaitStartedRoundTrustsStatus(t *testing.T) {
-	h := newHarness(t, true)
-	dir := round2Dir(t)
-	os.WriteFile(filepath.Join(rundir.RoundDir(dir, 2), startedFile), nil, 0o644)
-	h.ctl.WaitStatus = "blocked"
-	if code := runWait(h, dir); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if h.out.String() != `{"status":"blocked","round":2}`+"\n" {
-		t.Fatalf("stdout = %q", h.out)
-	}
-	assertCalls(t, h.ctl, waitCall)
 }

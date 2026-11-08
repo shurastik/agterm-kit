@@ -29,15 +29,15 @@ func TestMainUnknown(t *testing.T) {
 	}
 }
 
-func TestMainRoutesReviewRun(t *testing.T) {
+// The reviewer-loop subcommand of the old companion is gone.
+func TestMainReviewRunIsGone(t *testing.T) {
 	h := newHarness(t, false)
 	_, dir := runDir(t)
-	h.drivers["codex"].outputs = []string{threeFindings}
-	if code := h.env.Main(context.Background(), []string{"review", "run", dir}); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
+	if code := h.env.Main(context.Background(), []string{"review", "run", dir}); code != ExitError {
+		t.Fatalf("exit %d, want 1", code)
 	}
-	if len(h.drivers["codex"].turns) == 0 {
-		t.Fatal("review run not routed")
+	if !strings.Contains(h.err.String(), `unknown review command "run"`) || len(h.drivers["codex"].turns) != 0 {
+		t.Fatalf("stderr = %q", h.err)
 	}
 }
 

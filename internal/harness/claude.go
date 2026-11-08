@@ -136,6 +136,24 @@ func reviewerToolNames() []string {
 	return out
 }
 
+// InteractiveReviewer runs claude restricted (the user's allow rules and
+// hooks are ignored) with the reading tools, read-only git and a Write that is
+// allowed only under out. The allow rule is an Edit rule, because Write rules
+// are not matched by claude's file permission checks, in the absolute `//`
+// form. The mandatory flags come after the tuning.
+func (c *Claude) InteractiveReviewer(w config.Worker, _, out string, f ReviewerFiles, session, kickoff string) []string {
+	argv := append([]string{c.Bin}, claudeTuning(w)...)
+	allowed := append(ReviewerTools(), "Edit(/"+filepath.ToSlash(out)+"/**)")
+	argv = append(argv, "--restricted", "--strict-mcp-config",
+		"--tools", strings.Join(append(reviewerToolNames(), "Write"), ","),
+		"--permission-mode", "dontAsk", "--allowedTools", strings.Join(allowed, ","),
+		"--add-dir", out, "--settings", f.Settings)
+	if session != "" {
+		argv = append(argv, "--session-id", session)
+	}
+	return append(argv, kickoff)
+}
+
 func (c *Claude) Review(ctx context.Context, t Turn, term io.Writer) (string, error) {
 	// --restricted ignores the user's and project's settings, so no inherited
 	// allow rule widens the reviewer; --tools leaves only the reading tools and

@@ -53,3 +53,9 @@ var ClaudeApplierSettings []byte
 //
 //go:embed plan-review-prompt.md
 var PlanReviewPrompt string
+
+// ReviewFixupPrompt is the text/template typed to an interactive reviewer
+// whose output file failed validation.
+//
+//go:embed review-fixup-prompt.md
+var ReviewFixupPrompt string

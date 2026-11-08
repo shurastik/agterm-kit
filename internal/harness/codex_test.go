@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -195,5 +196,39 @@ func TestCodexResumeKeepsExecOptionsBeforeResume(t *testing.T) {
 		"resume", "T-1", "-c", `sandbox_mode="workspace-write"`, "--json", "-"}
 	if !reflect.DeepEqual(f.args, want) {
 		t.Fatalf("headless args = %q", f.args)
+	}
+}
+
+var codexSandbox = []string{
+	"--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", "/run/out",
+	"-c", "sandbox_workspace_write.writable_roots=[]",
+	"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+	"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+}
+
+func TestCodexInteractiveReviewer(t *testing.T) {
+	d := NewCodex(Runtime{})
+	cases := map[string]struct {
+		w    config.Worker
+		tune []string
+	}{
+		"bare":   {config.Worker{Harness: config.Codex}, nil},
+		"tuned":  {config.Worker{Harness: config.Codex, Model: "gpt-5.5", Effort: "high"}, []string{"-m", "gpt-5.5", "-c", `model_reasoning_effort="high"`}},
+		"extras": {config.Worker{Harness: config.Codex, Model: "gpt-5.5", ExtraArgs: []string{"--search", "-c", `model_verbosity="low"`}}, []string{"-m", "gpt-5.5", "--search", "-c", `model_verbosity="low"`}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := d.InteractiveReviewer(c.w, "/repo", "/run/out", ReviewerFiles{}, "ignored", "Read /p and follow it.")
+			want := append(append(append([]string{"codex"}, c.tune...), codexSandbox...), "Read /p and follow it.")
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("argv =\n%q\nwant\n%q", got, want)
+			}
+			// The mandatory flags come after every tuning argument, so a later
+			// -c or --sandbox of the user cannot win.
+			first := slices.Index(got, "--sandbox")
+			if first < 1+len(c.tune) {
+				t.Fatalf("--sandbox at %d, before the tuning ends at %d", first, 1+len(c.tune))
+			}
+		})
 	}
 }

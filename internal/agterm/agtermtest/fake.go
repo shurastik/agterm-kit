@@ -3,7 +3,6 @@ package agtermtest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,15 +36,11 @@ type Fake struct {
 	TypeErr      error
 	TextOut      string
 	TextErr      error
-	MsgSendErr   error
 	// WaitSeq, when non-empty, scripts successive Wait calls; each call pops
 	// the first entry. When it runs out, WaitStatus and WaitErr apply.
 	WaitSeq []WaitResult
 	// OnType, when set, runs before Type returns.
 	OnType func(target, text string)
-	// OnMsgRead, when set, answers MsgRead; otherwise it returns ErrNoMessage
-	// so a loop that waits for messages ends instead of spinning.
-	OnMsgRead func() ([]agterm.Message, error)
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
 	// OnWait, when set, runs before Wait returns (e.g. to write result.json).
@@ -130,23 +125,6 @@ func (f *Fake) Text(ctx context.Context, target string, lines int) (string, erro
 	f.record(ctx, "Text", target, fmt.Sprint(lines))
 	return f.TextOut, f.TextErr
 }
-
-func (f *Fake) MsgSend(ctx context.Context, to, body string) error {
-	f.record(ctx, "MsgSend", to, body)
-	return f.MsgSendErr
-}
-
-// MsgRead records the timeout.
-func (f *Fake) MsgRead(ctx context.Context, timeout time.Duration) ([]agterm.Message, error) {
-	f.record(ctx, "MsgRead", timeout.String())
-	if f.OnMsgRead != nil {
-		return f.OnMsgRead()
-	}
-	return nil, ErrNoMessage
-}
-
-// ErrNoMessage is MsgRead's answer when no messages were scripted.
-var ErrNoMessage = errors.New("agtermtest: no message scripted")
 
 func (f *Fake) Close(ctx context.Context, target string) error {
 	f.record(ctx, "Close", target)

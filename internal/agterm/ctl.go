@@ -165,8 +165,6 @@ type Ctl interface {
 	Close(ctx context.Context, target string) error
 	Type(ctx context.Context, target, text string) error
 	Text(ctx context.Context, target string, lines int) (string, error)
-	MsgSend(ctx context.Context, to, body string) error
-	MsgRead(ctx context.Context, timeout time.Duration) ([]Message, error)
 }
 
 var _ Ctl = (*CLI)(nil)

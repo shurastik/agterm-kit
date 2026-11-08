@@ -1,8 +1,8 @@
 package cli
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shurastik/agterm-kit/assets"
+	"github.com/shurastik/agterm-kit/internal/agterm"
+	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
+	"github.com/shurastik/agterm-kit/internal/config"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/rundir"
 )
@@ -61,29 +65,32 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	if err != nil || !strings.Contains(string(prompt), "+x") {
 		t.Fatalf("prompt.md: %v %q", err, prompt)
 	}
-	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "NewCompanion" {
-		t.Fatalf("calls = %v", h.ctl.Calls)
+	// The interactive output contract: schema, this round's file and the root.
+	for _, want := range []string{filepath.Join(dir, "schema.json"), filepath.Join(dir, "out", "1.json"), "git -C " + root} {
+		if !strings.Contains(string(prompt), want) {
+			t.Errorf("prompt lacks %q", want)
+		}
 	}
 	// The caller's PATH is pinned so codex and agtermctl resolve inside the
 	// companion even when agterm starts it without a login shell.
-	wantCmd := fmt.Sprintf("env 'PATH=/opt/homebrew/bin:/usr/bin' '/usr/local/bin/agk' review run '%s'", dir)
-	if got := h.ctl.Calls[0].Args; !reflect.DeepEqual(got, []string{"SELF", "codex-review #1", wantCmd, root}) {
-		t.Fatalf("companion args = %q", got)
+	first := "Read " + filepath.Join(dir, "rounds", "1", "prompt.md") + " and follow it."
+	wantCmd := fmt.Sprintf("env 'PATH=/opt/homebrew/bin:/usr/bin' 'codex' 'review' '--model=' '--root=%s' '--out=%s' '--settings=' '--session=' '%s'",
+		root, filepath.Join(dir, "out"), first)
+	want := []agtermtest.Call{
+		{Method: "NewCompanion", Args: []string{"SELF", "codex-review #1", wantCmd, root}},
+		{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
+		{Method: "Info", Args: []string{"COMP-1", "codex #1 r1: reviewing"}},
 	}
-	var out struct {
-		Companion *string `json:"companion"`
-		Dir       string  `json:"dir"`
+	if !reflect.DeepEqual(h.ctl.Calls, want) {
+		t.Fatalf("calls = %v\nwant %v", h.ctl.Calls, want)
 	}
-	if err := json.Unmarshal(h.out.Bytes(), &out); err != nil {
-		t.Fatalf("stdout %q: %v", h.out, err)
-	}
-	if out.Companion == nil || *out.Companion != "COMP-1" || out.Dir != dir {
-		t.Fatalf("stdout = %s", h.out)
+	if h.out.String() != `{"companion":"COMP-1","dir":"`+dir+`","started":true}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
 	}
 	if len(h.drivers["codex"].turns) != 0 {
 		t.Fatal("start must not run the reviewer itself inside agterm")
 	}
-	if s := readState(t, dir); s.Worker.Harness != "codex" || s.Base != "develop" || s.Session != "" {
+	if s := readState(t, dir); s.Worker.Harness != "codex" || s.Base != "develop" || s.Session != "" || !s.Interactive {
 		t.Fatalf("worker.json = %+v", s)
 	}
 	if k, err := rundir.Round(dir); err != nil || k != 1 {
@@ -91,6 +98,72 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	}
 	if id, err := os.ReadFile(filepath.Join(dir, "companion")); err != nil || string(id) != "COMP-1\n" {
 		t.Fatalf("companion file = %q, %v", id, err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "schema.json")); !bytes.Equal(got, assets.ReviewSchema) {
+		t.Fatal("schema.json missing or different")
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "out")); err != nil || !fi.IsDir() {
+		t.Fatalf("out/: %v", err)
+	}
+	if !roundStarted(dir, 1) {
+		t.Fatal("a confirmed handshake marks round 1 started")
+	}
+	noStatus(t, h)
+}
+
+func TestReviewStartClaudeInteractive(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude:claude-opus-5-5"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	first := "Read " + filepath.Join(dir, "rounds", "1", "prompt.md") + " and follow it."
+	wantCmd := fmt.Sprintf("'claude' 'review' '--model=claude-opus-5-5' '--root=%s' '--out=%s' '--settings=%s' '--session=SESS-NEW' '%s'",
+		root, filepath.Join(dir, "out"), filepath.Join(dir, "reviewer-settings.json"), first)
+	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || !reflect.DeepEqual(c.Args, []string{"SELF", "claude-review #1", wantCmd, root}) {
+		t.Fatalf("companion call = %v", c)
+	}
+	if s := readState(t, dir); s.Worker.Harness != "claude" || s.Worker.Model != "claude-opus-5-5" || s.Session != "SESS-NEW" || !s.Interactive {
+		t.Fatalf("worker.json = %+v", s)
+	}
+	settings, err := os.ReadFile(filepath.Join(dir, "reviewer-settings.json"))
+	if err != nil || !strings.Contains(string(settings), "'/usr/local/bin/agk' review hook completed") {
+		t.Fatalf("reviewer-settings.json: %v %s", err, settings)
+	}
+	prompt, _ := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
+	if strings.Contains(string(prompt), "git -C") || !strings.Contains(string(prompt), filepath.Join(dir, "out", "1.json")) {
+		t.Fatalf("claude prompt:\n%s", prompt)
+	}
+	noStatus(t, h)
+}
+
+// An unconfirmed start leaves the companion open for the user (a trust
+// prompt, a login screen) and says so.
+func TestReviewStartHandshakeTimeout(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	h.ctl.WaitErr = agterm.ErrTimeout
+	h.ctl.TextOut = "Do you trust the files in this folder?\n"
+	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	if h.out.String() != `{"companion":"COMP-1","dir":"`+dir+`","started":false}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if !strings.Contains(h.err.String(), "reviewer COMP-1 did not start") || !strings.Contains(h.err.String(), "Do you trust the files") {
+		t.Fatalf("stderr = %q", h.err)
+	}
+	if roundStarted(dir, 1) {
+		t.Fatal("an unconfirmed start must not mark round 1 started")
+	}
+	for _, m := range h.ctl.Methods() {
+		if m == "Close" {
+			t.Fatal("the companion stays open")
+		}
 	}
 }
 
@@ -144,7 +217,8 @@ func TestReviewStartRejectsUnquotablePaths(t *testing.T) {
 			h := newHarness(t, true)
 			scriptScope(h, t.TempDir())
 			h.env.Executable = func() (string, error) { return exe, nil }
-			if code := h.env.ReviewStart(context.Background(), nil); code == 0 {
+			// The claude reviewer's hooks run agk through the shell.
+			if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude"}); code == 0 {
 				t.Fatal("want non-zero exit")
 			}
 			if len(h.ctl.Calls) != 0 {
@@ -197,6 +271,15 @@ func TestReviewStartOutsideAgtermRunsInline(t *testing.T) {
 	if exists(filepath.Join(dir, "companion")) {
 		t.Fatal("inline run must not record a companion")
 	}
+	if exists(filepath.Join(dir, "out")) || exists(filepath.Join(dir, "schema.json")) {
+		t.Fatal("an inline run has no output directory")
+	}
+	if p, _ := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md")); strings.Contains(string(p), "out/1.json") || !strings.Contains(string(p), "Respond with a single JSON object") {
+		t.Fatalf("inline prompt keeps the schema contract and names no file:\n%s", p)
+	}
+	if s := readState(t, dir); s.Interactive {
+		t.Fatalf("inline state = %+v", s)
+	}
 }
 
 func TestReviewStartOutsideAgtermFailure(t *testing.T) {
@@ -216,7 +299,7 @@ func TestReviewStartRejectsBeforeCreatingRunDir(t *testing.T) {
 	root := t.TempDir()
 	scriptScope(h, root)
 	h.env.Executable = func() (string, error) { return `/opt/a\b/agk`, nil }
-	h.env.ReviewStart(context.Background(), nil)
+	h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude"})
 	if exists(filepath.Join(root, ".agk")) {
 		t.Fatal("run dir must not be created when the command cannot be built")
 	}
@@ -228,7 +311,7 @@ func TestReviewStartWithoutPathSkipsEnvPrefix(t *testing.T) {
 	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if cmd := h.ctl.Calls[0].Args[2]; !strings.HasPrefix(cmd, "'/usr/local/bin/agk' review run ") {
+	if cmd := h.ctl.Calls[0].Args[2]; !strings.HasPrefix(cmd, "'codex' 'review' ") {
 		t.Fatalf("command = %q", cmd)
 	}
 }
@@ -245,27 +328,11 @@ func TestReviewStartForwardsCodexHome(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	cmd := h.ctl.Calls[0].Args[2]
-	if !strings.HasPrefix(cmd, "env 'PATH=/usr/bin' 'CODEX_HOME=/custom/codex' 'CLAUDE_CONFIG_DIR=/custom/claude' 'AGTERMCTL=/opt/agterm/agtermctl' '/usr/local/bin/agk' review run ") {
+	if !strings.HasPrefix(cmd, "env 'PATH=/usr/bin' 'CODEX_HOME=/custom/codex' 'CLAUDE_CONFIG_DIR=/custom/claude' 'AGTERMCTL=/opt/agterm/agtermctl' 'codex' 'review' ") {
 		t.Fatalf("command = %q", cmd)
 	}
 	if strings.Contains(cmd, "sk-secret") {
 		t.Fatal("secrets must never be put on the companion command line")
-	}
-}
-
-func TestReviewStartClaudeReviewer(t *testing.T) {
-	h := newHarness(t, true)
-	root, _ := filepath.EvalSymlinks(t.TempDir())
-	scriptScope(h, root)
-	if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude:claude-opus-5-5"}); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err)
-	}
-	if name := h.ctl.Calls[0].Args[1]; name != "claude-review #1" {
-		t.Fatalf("companion name = %q", name)
-	}
-	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
-	if s := readState(t, dir); s.Worker.Harness != "claude" || s.Worker.Model != "claude-opus-5-5" {
-		t.Fatalf("worker.json = %+v", s)
 	}
 }
 
@@ -342,17 +409,18 @@ func TestReviewStartChangeSpawnsCompanion(t *testing.T) {
 	}
 	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
 	prompt, err := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
-	want, _ := review.PlanPrompt(samplePlanScope(root))
+	want, _ := review.PlanPrompt(samplePlanScope(root), review.Output{Schema: filepath.Join(dir, "schema.json"),
+		File: filepath.Join(dir, "out", "1.json"), Root: root, GitC: true})
 	if err != nil || string(prompt) != want {
-		t.Fatalf("prompt.md is not the plan prompt: %v\n%s", err, prompt)
+		t.Fatalf("prompt.md is not the interactive plan prompt: %v\n%s", err, prompt)
 	}
 	if s := readState(t, dir); s.Change != "add-x" || s.Base != "" || s.Worker.Harness != "codex" {
 		t.Fatalf("worker.json = %+v", s)
 	}
-	if len(h.ctl.Calls) != 1 || h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "codex-review #1" {
+	if h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "codex-review #1" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
-	if !strings.Contains(h.out.String(), `"companion":"COMP-1"`) {
+	if !strings.Contains(h.out.String(), `"companion":"COMP-1"`) || !strings.Contains(h.out.String(), `"started":true`) {
 		t.Fatalf("stdout = %q", h.out)
 	}
 }
@@ -478,5 +546,183 @@ func TestReviewStartRecordsTargetOfEachKind(t *testing.T) {
 	}
 	if s := readState(t, filepath.Join(root2, ".agk", "reviews", "20261105-100000")); s.Change != "add-x" || s.Base != "" {
 		t.Fatalf("plan run state = %+v", s)
+	}
+}
+
+// A worker.json written before the reviewer became interactive loads as
+// non-interactive.
+func TestReviewStateInteractiveDefaultsFalse(t *testing.T) {
+	_, dir := runDir(t)
+	if s := readState(t, dir); s.Interactive {
+		t.Fatalf("state = %+v", s)
+	}
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: config.Codex}, Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if s := readState(t, dir); !s.Interactive {
+		t.Fatalf("state = %+v", s)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, workerFile))
+	if !strings.Contains(string(raw), `"interactive": true`) {
+		t.Fatalf("worker.json = %s", raw)
+	}
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: config.Codex}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, workerFile))
+	if strings.Contains(string(raw), "interactive") {
+		t.Fatalf("interactive must be omitted when false: %s", raw)
+	}
+}
+
+func TestPrepareOutWritesSchema(t *testing.T) {
+	_, dir := runDir(t)
+	out, schema, err := prepareOut(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != filepath.Join(dir, "out") || schema != filepath.Join(dir, "schema.json") {
+		t.Fatalf("out %q schema %q", out, schema)
+	}
+	if fi, err := os.Stat(out); err != nil || !fi.IsDir() {
+		t.Fatalf("out dir: %v", err)
+	}
+	got, err := os.ReadFile(schema)
+	if err != nil || !bytes.Equal(got, assets.ReviewSchema) {
+		t.Fatalf("schema.json differs from assets.ReviewSchema: %v", err)
+	}
+}
+
+func writeReviewerConfig(t *testing.T, root, harnessName string, extra ...string) {
+	t.Helper()
+	q := make([]string, len(extra))
+	for i, a := range extra {
+		q[i] = fmt.Sprintf("%q", a)
+	}
+	toml := fmt.Sprintf("[reviewer]\nharness = %q\nextra_args = [%s]\n", harnessName, strings.Join(q, ", "))
+	if err := os.WriteFile(filepath.Join(root, ".agk.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Reviewer extra_args that would widen its permissions are refused before a
+// run dir exists, inline and in agterm alike.
+func TestReviewStartRefusesWideningExtraArgs(t *testing.T) {
+	cases := []struct {
+		harness string
+		args    []string
+		named   string
+	}{
+		{"codex", []string{"--sandbox", "danger-full-access"}, "--sandbox"},
+		{"codex", []string{"--sandbox=danger-full-access"}, "--sandbox=danger-full-access"},
+		{"codex", []string{"-a", "never"}, "-a"},
+		{"codex", []string{"--yolo"}, "--yolo"},
+		{"codex", []string{"--add-dir", "/"}, "--add-dir"},
+		{"codex", []string{"-c", `sandbox_mode="danger-full-access"`}, "sandbox_mode"},
+		{"codex", []string{"--config", `approval_policy="never"`}, "approval_policy"},
+		{"claude", []string{"--dangerously-skip-permissions"}, "--dangerously-skip-permissions"},
+		{"claude", []string{"--permission-mode=bypassPermissions"}, "--permission-mode=bypassPermissions"},
+		{"claude", []string{"--allowedTools", "Bash"}, "--allowedTools"},
+		{"claude", []string{"--settings", "/x.json"}, "--settings"},
+	}
+	for _, inAgterm := range []bool{true, false} {
+		for _, c := range cases {
+			name := fmt.Sprintf("agterm=%v %s %s", inAgterm, c.harness, strings.Join(c.args, " "))
+			t.Run(name, func(t *testing.T) {
+				h := newHarness(t, inAgterm)
+				root, _ := filepath.EvalSymlinks(t.TempDir())
+				scriptScope(h, root)
+				writeReviewerConfig(t, root, c.harness, c.args...)
+				if code := h.env.ReviewStart(context.Background(), nil); code != 1 {
+					t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
+				}
+				if !strings.Contains(h.err.String(), c.named) || h.out.Len() != 0 {
+					t.Fatalf("stderr %q stdout %q", h.err, h.out)
+				}
+				if exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+					t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
+				}
+				if len(h.drivers[c.harness].turns) != 0 {
+					t.Fatal("the reviewer must not run")
+				}
+			})
+		}
+	}
+}
+
+func TestReviewStartHarmlessExtraArgsPass(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	writeReviewerConfig(t, root, "codex", "-c", `model_verbosity="low"`)
+	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if s := readState(t, filepath.Join(root, ".agk", "reviews", "20261105-100000")); !reflect.DeepEqual(s.Worker.ExtraArgs, []string{"-c", `model_verbosity="low"`}) {
+		t.Fatalf("state = %+v", s)
+	}
+}
+
+// The applier's extra_args are the applier's business.
+func TestReviewStartIgnoresApplierExtraArgs(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	toml := "[applier]\nharness = \"codex\"\nextra_args = [\"--sandbox\", \"danger-full-access\"]\n"
+	os.WriteFile(filepath.Join(root, ".agk.toml"), []byte(toml), 0o644)
+	if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+}
+
+// The out path goes into a claude permission rule: a repo path that could
+// inject or widen rules is refused before anything exists.
+func TestReviewStartRefusesRuleUnsafePathForClaude(t *testing.T) {
+	for name, dirName := range map[string]string{
+		"injection": "review),Bash,Read(x",
+		"glob":      "star*",
+		"space":     "my repo",
+		"brace":     "a{b,c}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			base, _ := filepath.EvalSymlinks(t.TempDir())
+			root := filepath.Join(base, dirName)
+			os.MkdirAll(root, 0o755)
+			scriptScope(h, root)
+			if code := h.env.ReviewStart(context.Background(), []string{"--reviewer", "claude"}); code != 1 {
+				t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
+			}
+			if !strings.Contains(h.err.String(), "permission rule") || h.out.Len() != 0 {
+				t.Fatalf("stderr %q stdout %q", h.err, h.out)
+			}
+			if exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+				t.Fatalf("no run dir and no companion expected: %v", h.ctl.Calls)
+			}
+		})
+	}
+}
+
+// Only the interactive claude reviewer takes the rule: codex and inline runs
+// do not care about such a path.
+func TestReviewStartRuleUnsafePathOtherModesPass(t *testing.T) {
+	for name, c := range map[string]struct {
+		inAgterm bool
+		args     []string
+	}{
+		"codex in agterm": {true, nil},
+		"claude inline":   {false, []string{"--reviewer", "claude"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, c.inAgterm)
+			base, _ := filepath.EvalSymlinks(t.TempDir())
+			root := filepath.Join(base, "review),Bash,Read(x")
+			os.MkdirAll(root, 0o755)
+			scriptScope(h, root)
+			h.drivers["claude"].outputs = []string{approve}
+			if code := h.env.ReviewStart(context.Background(), c.args); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+		})
 	}
 }

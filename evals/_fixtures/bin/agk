@@ -46,7 +46,7 @@ case "$cmd $sub" in
   mkdir -p "$dir/rounds/1"
   echo 1 > "$dir/round"; echo "$change" > "$dir/change"
   checksums "$change" > "$dir/rounds/1/checksums"
-  printf '{"companion":"%s","dir":"%s"}\n' "$companion" "$dir"
+  printf '{"companion":"%s","dir":"%s","started":true}\n' "$companion" "$dir"
   ;;
 "review wait")
   dir="$(run_dir "${3:-}")" || exit 1

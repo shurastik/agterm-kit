@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -228,5 +229,38 @@ func TestClaudeUnconfirmedSessionIsNotReturned(t *testing.T) {
 	turn.Resume = true
 	if sess, _ := d.Review(context.Background(), turn, io.Discard); sess != "S-PLANNED" {
 		t.Fatalf("resumed session %q", sess)
+	}
+}
+
+func TestClaudeInteractiveReviewer(t *testing.T) {
+	d := NewClaude(Runtime{})
+	files := ReviewerFiles{Settings: "/run/reviewer-settings.json"}
+	mandatory := []string{
+		"--restricted", "--strict-mcp-config", "--tools", "Read,Grep,Glob,Bash,Write",
+		"--permission-mode", "dontAsk",
+		"--allowedTools", reviewerTools() + ",Edit(//run/out/**)",
+		"--add-dir", "/run/out", "--settings", "/run/reviewer-settings.json", "--session-id", "S-1",
+	}
+	got := d.InteractiveReviewer(config.Worker{Harness: config.Claude}, "/repo", "/run/out", files, "S-1", "Read /p and follow it.")
+	want := append(append([]string{"claude"}, mandatory...), "Read /p and follow it.")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv =\n%q\nwant\n%q", got, want)
+	}
+
+	w := config.Worker{Harness: config.Claude, Model: "claude-opus-5-5", Effort: "high", ExtraArgs: []string{"--max-turns", "9"}}
+	got = d.InteractiveReviewer(w, "/repo", "/run/out", files, "S-1", "kick")
+	tune := []string{"--model", "claude-opus-5-5", "--effort", "high", "--max-turns", "9"}
+	want = append(append(append([]string{"claude"}, tune...), mandatory...), "kick")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tuned argv =\n%q\nwant\n%q", got, want)
+	}
+	if i := slices.Index(got, "--restricted"); i < 1+len(tune) {
+		t.Fatalf("mandatory flags start at %d, before the tuning ends at %d", i, 1+len(tune))
+	}
+	// Write on its own is not allowed anywhere; the rule is path scoped.
+	for _, tool := range strings.Split(got[slices.Index(got, "--allowedTools")+1], ",") {
+		if tool == "Write" || tool == "Edit" || tool == "Bash" {
+			t.Fatalf("unscoped %s in the allow rules", tool)
+		}
 	}
 }

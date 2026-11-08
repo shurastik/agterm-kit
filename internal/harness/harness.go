@@ -43,16 +43,27 @@ type ApplierFiles struct {
 	Settings, Rules string
 }
 
+// ReviewerFiles are the claude reviewer's settings file (agent-status hooks);
+// codex needs none.
+type ReviewerFiles struct {
+	Settings string
+}
+
 // Driver turns a worker configuration into harness invocations.
 type Driver interface {
 	Name() string
 	// Interactive is the argv of an interactive applier session started with
 	// kickoff as its first prompt.
 	Interactive(w config.Worker, root string, f ApplierFiles, session, kickoff string) []string
+	// InteractiveReviewer is the argv of an interactive, read-only reviewer
+	// session started with kickoff as its first prompt. Its only writable place
+	// is out; root is the repository.
+	InteractiveReviewer(w config.Worker, root, out string, f ReviewerFiles, session, kickoff string) []string
 	// Headless runs one applier turn and returns the harness session id.
 	Headless(ctx context.Context, t Turn, f ApplierFiles, term io.Writer) (string, error)
-	// Review runs one read-only review turn constrained to the review schema,
-	// leaving the structured result in t.Dir/OutputFile; returns the session id.
+	// Review runs one headless read-only review turn (the inline review, outside
+	// agterm) constrained to the review schema, leaving the structured result in
+	// t.Dir/OutputFile; returns the session id.
 	Review(ctx context.Context, t Turn, term io.Writer) (string, error)
 }
 

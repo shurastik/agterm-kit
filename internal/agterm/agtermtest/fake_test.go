@@ -19,10 +19,6 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 	infoErr := f.Info(ctx, "C", "md")
 	_ = f.Type(ctx, "C", "go\r")
 	screen, _ := f.Text(ctx, "C", 20)
-	_ = f.MsgSend(ctx, "C:P", "round 2")
-	if _, err := f.MsgRead(ctx, 0); !errors.Is(err, ErrNoMessage) {
-		t.Fatalf("unscripted MsgRead = %v", err)
-	}
 	if id != "C" || infoErr == nil || typed != "go\r" || screen != "screen" {
 		t.Fatalf("scripted results not returned: id=%q infoErr=%v typed=%q screen=%q", id, infoErr, typed, screen)
 	}
@@ -32,8 +28,6 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 		{"Info", []string{"C", "md"}},
 		{"Type", []string{"C", "go\r"}},
 		{"Text", []string{"C", "20"}},
-		{"MsgSend", []string{"C:P", "round 2"}},
-		{"MsgRead", []string{"0s"}},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Fatalf("calls = %v", f.Calls)

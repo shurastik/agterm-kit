@@ -18,14 +18,20 @@ import (
 	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
-// sendDir is a codex review run whose round 1 finished, with companion C-1 in pane P-1.
+// sendDir is a codex review whose round 1 finished. With companion it is
+// an interactive run with companion C-1; without, an inline run.
 func sendDir(t *testing.T, h *tenv, session string, companion bool) (string, string) {
 	t.Helper()
 	root, dir := runDirWith(t, config.Worker{Harness: "codex"}, session)
 	writeResultFile(t, dir, completedResult)
 	if companion {
 		os.WriteFile(filepath.Join(dir, CompanionFile), []byte("C-1\n"), 0o644)
-		os.WriteFile(filepath.Join(dir, paneFile), []byte("P-1\n"), 0o644)
+		if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Base: "main", Session: session, Interactive: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := prepareOut(dir); err != nil {
+			t.Fatal(err)
+		}
 	}
 	scriptScope(h, root)
 	return root, dir
@@ -37,11 +43,11 @@ func runSend(h *tenv, args ...string) int {
 
 func TestReviewSendSecondRound(t *testing.T) {
 	h := newHarness(t, true)
-	root, dir := sendDir(t, h, "T-1", true)
+	root, dir := sendDir(t, h, "", true)
 	seen := scriptScope(h, root)
 	note := filepath.Join(t.TempDir(), "fixed.md")
 	os.WriteFile(note, []byte("Fixed the nil check."), 0o644)
-	h.ctl.WaitStatus = "active"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
 
 	if code := runSend(h, dir, "--note", note); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
@@ -49,11 +55,13 @@ func TestReviewSendSecondRound(t *testing.T) {
 	if !reflect.DeepEqual(*seen, []string{root, "main"}) {
 		t.Fatalf("collect = %q", *seen)
 	}
-	p, err := os.ReadFile(filepath.Join(dir, "rounds", "2", "prompt.md"))
+	prompt := filepath.Join(dir, "rounds", "2", "prompt.md")
+	p, err := os.ReadFile(prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"round 2", "earlier findings", "Fixed the nil check.", "+x"} {
+	// A live session: always the re-review wrapper, whatever the session id.
+	for _, want := range []string{"round 2", "earlier findings", "Fixed the nil check.", "+x", filepath.Join(dir, "out", "2.json"), "git -C " + root} {
 		if !strings.Contains(string(p), want) {
 			t.Errorf("round 2 prompt lacks %q", want)
 		}
@@ -62,23 +70,48 @@ func TestReviewSendSecondRound(t *testing.T) {
 		t.Fatalf("round = %d", k)
 	}
 	assertCalls(t, h.ctl,
-		agtermtest.Call{Method: "MsgSend", Args: []string{"C-1:P-1", "round 2"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "10m0s"}},
+		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "30s"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r2: reviewing"}},
 	)
+	noStatus(t, h)
+	if !roundStarted(dir, 2) {
+		t.Fatal("a confirmed handshake marks round 2 started")
+	}
 	if want := `{"companion":"C-1","dir":"` + dir + `","round":2}` + "\n"; h.out.String() != want {
 		t.Fatalf("stdout = %q", h.out)
 	}
 }
 
-func TestReviewSendWithoutSessionUsesFirstRoundPrompt(t *testing.T) {
+func TestReviewSendTimeoutFlag(t *testing.T) {
 	h := newHarness(t, true)
 	_, dir := sendDir(t, h, "", true)
-	h.ctl.WaitStatus = "active"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "idle"}, {Status: "active"}}
+	if code := runSend(h, dir, "--timeout", "45"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if c := h.ctl.Calls[0]; c.Args[2] != "45s" {
+		t.Fatalf("wait = %v", c)
+	}
+	for _, bad := range []string{"0", "-1", "soon"} {
+		h := newHarness(t, true)
+		_, dir := sendDir(t, h, "", true)
+		if code := runSend(h, dir, "--timeout", bad); code != 1 || len(h.ctl.Calls) != 0 {
+			t.Errorf("--timeout %s: exit %d calls %v", bad, code, h.ctl.Calls)
+		}
+	}
+}
+
+func TestReviewSendWithoutSessionUsesFirstRoundPrompt(t *testing.T) {
+	h := newHarness(t, false)
+	_, dir := sendDir(t, h, "", false)
+	h.drivers["codex"].outputs = []string{approve}
 	if code := runSend(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	p, _ := os.ReadFile(filepath.Join(dir, "rounds", "2", "prompt.md"))
-	first, _ := review.Prompt(review.Scope{Base: "main", MergeBase: "mb", Diff: "+x\n", Stat: " f | 1 +\n"})
+	first, _ := review.Prompt(review.Scope{Base: "main", MergeBase: "mb", Diff: "+x\n", Stat: " f | 1 +\n"}, review.Output{})
 	if string(p) != first {
 		t.Fatalf("prompt = %q", p)
 	}
@@ -87,18 +120,31 @@ func TestReviewSendWithoutSessionUsesFirstRoundPrompt(t *testing.T) {
 func TestReviewSendRefusals(t *testing.T) {
 	cases := map[string]struct {
 		prep func(t *testing.T, h *tenv, dir string)
+		args []string
 		want string
 	}{
-		"still running": {func(t *testing.T, h *tenv, dir string) { os.Remove(filepath.Join(dir, "rounds", "1", "result.json")) }, "still running"},
+		"still running": {func(t *testing.T, h *tenv, dir string) { os.Remove(filepath.Join(dir, "rounds", "1", "result.json")) }, nil, "still running"},
 		"nothing to review": {func(t *testing.T, h *tenv, dir string) {
 			h.env.Collect = func(context.Context, string, string) (review.Scope, error) {
 				return review.Scope{}, review.ErrNothingToReview
 			}
-		}, "nothing to review"},
-		"pane unknown":  {func(t *testing.T, h *tenv, dir string) { os.Remove(filepath.Join(dir, paneFile)) }, "pane"},
-		"reviewer gone": {func(t *testing.T, h *tenv, dir string) { h.ctl.MsgSendErr = agterm.ErrGone }, "gone"},
-		"send error":    {func(t *testing.T, h *tenv, dir string) { h.ctl.MsgSendErr = errors.New("socket refused") }, "socket refused"},
-		"missing note":  {func(t *testing.T, h *tenv, dir string) {}, "no-such-note"},
+		}, nil, "nothing to review"},
+		"reviewer busy": {func(t *testing.T, h *tenv, dir string) {
+			h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}}
+		}, []string{"--timeout", "30"}, "reviewer C-1 is busy: its turn did not end within 30 s"},
+		"permission prompt": {func(t *testing.T, h *tenv, dir string) { h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "blocked"}} }, nil, "waits for the user"},
+		"reviewer gone": {func(t *testing.T, h *tenv, dir string) {
+			h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrGone}}
+		}, nil, "gone; start a new review"},
+		"reviewer gone typed": {func(t *testing.T, h *tenv, dir string) { h.ctl.WaitStatus = "idle"; h.ctl.TypeErr = agterm.ErrGone }, nil, "gone; start a new review"},
+		"send error": {func(t *testing.T, h *tenv, dir string) {
+			h.ctl.WaitStatus = "idle"
+			h.ctl.TypeErr = errors.New("socket refused")
+		}, nil, "socket refused"},
+		"missing note": {func(t *testing.T, h *tenv, dir string) {}, []string{"--note", "NOSUCH"}, "no-such-note"},
+		"older agk": {func(t *testing.T, h *tenv, dir string) {
+			rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Base: "main", Session: "T-1"})
+		}, nil, "older agk"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -106,8 +152,11 @@ func TestReviewSendRefusals(t *testing.T) {
 			_, dir := sendDir(t, h, "T-1", true)
 			c.prep(t, h, dir)
 			args := []string{dir}
-			if name == "missing note" {
-				args = append(args, "--note", filepath.Join(t.TempDir(), "no-such-note"))
+			for _, a := range c.args {
+				if a == "NOSUCH" {
+					a = filepath.Join(t.TempDir(), "no-such-note")
+				}
+				args = append(args, a)
 			}
 			if code := runSend(h, args...); code != 1 {
 				t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
@@ -118,19 +167,63 @@ func TestReviewSendRefusals(t *testing.T) {
 			if k, _ := rundir.Round(dir); k != 1 || exists(filepath.Join(dir, "rounds", "2")) {
 				t.Fatalf("no round may be recorded: round %d", k)
 			}
+			if name != "reviewer gone typed" && name != "send error" && len(typed(h)) != 0 {
+				t.Fatalf("nothing may be typed: %v", h.ctl.Calls)
+			}
+			noStatus(t, h)
 		})
+	}
+}
+
+// An older run is refused before anything touches agterm.
+func TestReviewSendOlderRunTouchesNothing(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "T-1", true)
+	rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Base: "main", Session: "T-1"})
+	if code := runSend(h, dir); code != 1 || len(h.ctl.Calls) != 0 {
+		t.Fatalf("exit %d calls %v", code, h.ctl.Calls)
+	}
+}
+
+// A round recorded from a valid file while the turn still runs leaves the
+// status active: send waits for the turn instead of typing into it.
+func TestReviewSendRoundRecordedMidTurnWaitsForTheTurn(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "", true)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}} // still active
+	if code := runSend(h, dir, "--timeout", "30"); code != 1 || !strings.Contains(h.err.String(), "busy") {
+		t.Fatalf("exit %d stderr %q", code, h.err)
+	}
+	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "30s"}})
+}
+
+// A round failed by validation leaves no blocked status behind: the next round
+// is typed normally.
+func TestReviewSendAfterFailedRound(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "", true)
+	writeResultFile(t, dir, `{"status":"blocked","round":1,"reason":"invalid review output","findings":0}`)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "idle"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if got := typed(h); len(got) != 1 {
+		t.Fatalf("typed = %q", got)
 	}
 }
 
 func TestReviewSendHandshakeTimeoutWarns(t *testing.T) {
 	h := newHarness(t, true)
 	_, dir := sendDir(t, h, "T-1", true)
-	h.ctl.WaitErr = agterm.ErrTimeout
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Err: agterm.ErrTimeout}}
 	if code := runSend(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if !strings.Contains(h.err.String(), "warning") || !strings.Contains(h.out.String(), `"round":2`) {
+	if !strings.Contains(h.err.String(), "did not report round 2 as started") || !strings.Contains(h.out.String(), `"round":2`) {
 		t.Fatalf("stderr %q stdout %q", h.err, h.out)
+	}
+	if roundStarted(dir, 2) {
+		t.Fatal("an unconfirmed round must not be marked started")
 	}
 }
 
@@ -228,7 +321,7 @@ func TestReviewStateRecordsChangeWithoutBase(t *testing.T) {
 func planSendDir(t *testing.T, h *tenv, session string, companion bool, body string) (string, string, *[]string) {
 	t.Helper()
 	root, dir := sendDir(t, h, session, companion)
-	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Change: "add-x", Session: session}); err != nil {
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Change: "add-x", Session: session, Interactive: companion}); err != nil {
 		t.Fatal(err)
 	}
 	var seen []string
@@ -281,16 +374,16 @@ func TestReviewSendPlanInlineResumesSession(t *testing.T) {
 }
 
 func TestReviewSendPlanWithoutSessionUsesPlanPrompt(t *testing.T) {
-	h := newHarness(t, true)
-	root, dir, _ := planSendDir(t, h, "", true, "TASKS\n")
-	h.ctl.WaitStatus = "active"
+	h := newHarness(t, false)
+	root, dir, _ := planSendDir(t, h, "", false, "TASKS\n")
+	h.drivers["codex"].outputs = []string{approve}
 	if code := runSend(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	p, _ := os.ReadFile(filepath.Join(dir, "rounds", "2", "prompt.md"))
 	first, _ := review.PlanPrompt(review.PlanScope{Root: root, Change: "add-x", Files: []review.UntrackedFile{
 		{Path: "openspec/changes/add-x/tasks.md", Content: "TASKS\n"},
-	}})
+	}}, review.Output{})
 	if string(p) != first {
 		t.Fatalf("prompt = %q", p)
 	}
@@ -339,15 +432,15 @@ func legacyRun(t *testing.T, dir string) {
 }
 
 func TestLegacyRunIsSentAsDiffReview(t *testing.T) {
-	h := newHarness(t, true)
-	root, dir := sendDir(t, h, "T-1", true)
+	h := newHarness(t, false)
+	root, dir := sendDir(t, h, "T-1", false)
 	legacyRun(t, dir)
 	seen := scriptScope(h, root)
 	h.env.CollectPlan = func(context.Context, string, string) (review.PlanScope, error) {
 		t.Fatal("a legacy run must not collect a plan scope")
 		return review.PlanScope{}, nil
 	}
-	h.ctl.WaitStatus = "active"
+	h.drivers["codex"].outputs = []string{approve}
 	if code := runSend(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
@@ -357,6 +450,21 @@ func TestLegacyRunIsSentAsDiffReview(t *testing.T) {
 	p, _ := os.ReadFile(filepath.Join(dir, "rounds", "2", "prompt.md"))
 	if !strings.Contains(string(p), "+x") || !strings.Contains(string(p), "round 2") {
 		t.Fatalf("round 2 prompt = %q", p)
+	}
+}
+
+func TestReviewSendPlanInteractiveNamesOutputFile(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir, _ := planSendDir(t, h, "", true, "EDITED_TASKS\n")
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	p, _ := os.ReadFile(filepath.Join(dir, "rounds", "2", "prompt.md"))
+	for _, want := range []string{"round 2", "EDITED_TASKS", filepath.Join(dir, "out", "2.json")} {
+		if !strings.Contains(string(p), want) {
+			t.Errorf("plan round 2 prompt lacks %q", want)
+		}
 	}
 }
 

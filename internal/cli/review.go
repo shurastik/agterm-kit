@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shurastik/agterm-kit/assets"
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/config"
 	"github.com/shurastik/agterm-kit/internal/fsx"
@@ -20,25 +21,28 @@ import (
 	"github.com/shurastik/agterm-kit/internal/rundir"
 )
 
-// reporter mirrors review progress into agterm status; a no-op outside agterm.
+// reporter sets a worker companion's sidebar info line. It never touches the
+// agent status: an interactive harness reports its own turns through its
+// hooks, and a status set by agk could mark a turn done or blocked that is not.
 type reporter struct {
 	env    *Env
 	target string
 }
 
-// statusTimeout bounds each status update, which runs detached from the
-// review's context so a cancelled run still reports blocked.
+// statusTimeout bounds each info update, which runs detached from the caller's
+// context so a cancelled run still reports.
 const statusTimeout = 5 * time.Second
 
-// statusAttempts and statusRetryDelay govern final-status retries: a lost
-// completed/blocked would leave `session wait` hanging.
+// statusAttempts and statusRetryDelay govern final-line retries: the outcome
+// is on disk either way, but the sidebar should show it.
 var (
 	statusAttempts   = 3
 	statusRetryDelay = 500 * time.Millisecond
 )
 
-// set reports state and line, retrying final states; it reports whether
-// agterm took the update.
+// set updates the info line, retrying the final states ("completed",
+// "blocked"); state only picks the retry policy. It reports whether agterm
+// took the update.
 func (r reporter) set(ctx context.Context, state, line string) bool {
 	if r.target == "" {
 		return false
@@ -48,11 +52,13 @@ func (r reporter) set(ctx context.Context, state, line string) bool {
 		attempts = statusAttempts
 	}
 	for i := 1; ; i++ {
-		err := r.update(ctx, state, line)
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
+		err := r.env.Ctl.Info(cctx, r.target, line)
+		cancel()
 		if err == nil {
 			return true
 		}
-		// Status is best effort: a broken socket must not abort the review.
+		// The line is best effort: a broken socket must not abort the review.
 		fmt.Fprintf(r.env.Stderr, "agk: warning: %v\n", err)
 		if i >= attempts {
 			return false
@@ -61,29 +67,42 @@ func (r reporter) set(ctx context.Context, state, line string) bool {
 	}
 }
 
-func (r reporter) update(ctx context.Context, state, line string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
-	defer cancel()
-	if err := r.env.Ctl.Status(ctx, r.target, state); err != nil {
-		return err
-	}
-	return r.env.Ctl.Info(ctx, r.target, line)
-}
-
 // Run-dir files of a review.
 const (
 	workerFile = "worker.json" // reviewState
-	paneFile   = "pane"        // the reviewer loop's own pane id
 	reviewLog  = "reviewer.log"
 )
 
-// reviewState is worker.json: the configuration a review run is pinned to.
+// reviewState is worker.json: the configuration a review is pinned to.
 // A diff review records its base, a plan review its change.
 type reviewState struct {
 	Worker  config.Worker `json:"worker"`
 	Base    string        `json:"base,omitempty"`
 	Change  string        `json:"change,omitempty"`
 	Session string        `json:"session,omitempty"`
+	// Interactive marks a reviewer that runs as a harness TUI in its
+	// companion. A companion without it was started by an older agk.
+	Interactive bool `json:"interactive,omitempty"`
+}
+
+// Files of an interactive review in the run directory.
+const (
+	outDirName = "out"         // the only place the reviewer may write
+	schemaName = "schema.json" // the review output schema, for the reviewer to read
+)
+
+// prepareOut creates <run>/out/ and writes the embedded review schema to
+// <run>/schema.json.
+func prepareOut(dir string) (out, schema string, err error) {
+	out = filepath.Join(dir, outDirName)
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return "", "", err
+	}
+	schema = filepath.Join(dir, schemaName)
+	if err := fsx.ReplaceFile(schema, assets.ReviewSchema, 0o644); err != nil {
+		return "", "", err
+	}
+	return out, schema, nil
 }
 
 // runResult is rounds/<k>/result.json, the round's outcome on disk for
@@ -104,7 +123,7 @@ func writeResult(rd string, r runResult) error {
 	return fsx.ReplaceFile(filepath.Join(rd, "result.json"), append(b, '\n'), 0o644)
 }
 
-// reviewRun is a verified review run directory.
+// reviewRun is a verified run directory of a review.
 type reviewRun struct {
 	dir, root string
 	num       int
@@ -142,77 +161,18 @@ func (r reviewRun) label(k int) review.Label {
 	return review.Label{Harness: r.state.Worker.Harness, Num: r.num, Round: k}
 }
 
-// ReviewRun implements `agk review run <dir>`: the process inside the
-// companion. It runs the recorded round, then waits in its mailbox for
-// `agk review send` to request the next one; outside agterm it runs one round.
-func (e *Env) ReviewRun(ctx context.Context, args []string) int {
-	rep := reporter{env: e, target: e.session()}
-	setupFailed := func(err error) int {
-		rep.set(ctx, "blocked", review.FailureLine(review.Label{}, review.ReasonSetupFailed))
-		return e.errorf("%s: %v", review.ReasonSetupFailed, err)
-	}
-	if len(args) != 1 {
-		return setupFailed(errors.New("usage: agk review run <run-dir>"))
-	}
-	run, err := loadReviewRun(args[0])
-	if err != nil {
-		return setupFailed(err)
-	}
-	if rep.target != "" {
-		if pane := e.Getenv("AGTERM_PANE_ID"); pane != "" {
-			if err := fsx.ReplaceFile(filepath.Join(run.dir, paneFile), []byte(pane+"\n"), 0o644); err != nil {
-				return setupFailed(err)
-			}
-		}
-	}
-	k, _ := rundir.Round(run.dir)
-	for {
-		code := e.runRound(ctx, run.dir, k, e.Stdout, rep)
-		if rep.target == "" || ctx.Err() != nil {
-			return code
-		}
-		next, err := e.nextRound(ctx, run.dir, k)
-		if err != nil {
-			if ctx.Err() != nil {
-				return code
-			}
-			return e.errorf("wait for the next round: %v", err)
-		}
-		k = next
-	}
-}
-
-// nextRound blocks in the companion's mailbox until the run's round file
-// moves past k.
-func (e *Env) nextRound(ctx context.Context, dir string, k int) (int, error) {
-	for {
-		_, err := e.Ctl.MsgRead(ctx, 0)
-		if err != nil && !errors.Is(err, agterm.ErrTimeout) {
-			return 0, err
-		}
-		if cur, err := rundir.Round(dir); err == nil && cur > k {
-			return cur, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-	}
-}
-
-// runRound runs round k of the review in dir and records its outcome.
-func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, rep reporter) int {
+// runRound runs round k of the inline review in dir (outside agterm, the
+// reviewer headless in the foreground) and records its outcome.
+func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer) int {
 	run, err := loadReviewRun(dir)
 	if err != nil {
-		rep.set(ctx, "blocked", review.FailureLine(review.Label{}, review.ReasonSetupFailed))
 		return e.errorf("%s: %v", review.ReasonSetupFailed, err)
 	}
 	rd := rundir.RoundDir(run.dir, k)
-	l := run.label(k)
 	fail := func(reason string, err error) int {
 		if werr := writeResult(rd, runResult{Status: "blocked", Round: k, Reason: reason}); werr != nil {
 			fmt.Fprintf(e.Stderr, "agk: warning: %v\n", werr)
 		}
-		rep.set(ctx, "blocked", review.FailureLine(l, reason))
 		return e.errorf("%s: %v", reason, err)
 	}
 	prompt, err := os.ReadFile(filepath.Join(rd, "prompt.md"))
@@ -224,11 +184,6 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, r
 		return fail(review.ReasonSetupFailed, err)
 	}
 	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d started, run dir %s\n", run.num, k, run.dir)
-	if rep.set(ctx, "active", review.ReviewingLine(l)) {
-		// Only a confirmed active replaces the last round's status, so only
-		// then may `review wait` trust the statuses that follow.
-		markStarted(run.dir, k)
-	}
 	turn := harness.Turn{Worker: run.state.Worker, Root: run.root, Dir: rd, Log: reviewLog, Prompt: string(prompt),
 		Session: run.state.Session, Resume: run.state.Session != ""}
 	session, rerr := driver.Review(ctx, turn, term)
@@ -259,7 +214,6 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer, r
 	if err := writeResult(rd, runResult{Status: "completed", Round: k, Findings: len(r.Findings), Verdict: r.Verdict}); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	rep.set(ctx, "completed", review.SummaryLine(l, r))
 	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d: %d finding(s), verdict %s -> %s\n",
 		run.num, k, len(r.Findings), r.Verdict, filepath.Join(rd, "review.json"))
 	return ExitOK
@@ -271,29 +225,11 @@ var forwardedEnv = []string{"PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "AGTERMCT
 // CompanionFile is the run-dir file holding a worker companion's session id.
 const CompanionFile = "companion"
 
+// startResult is what an inline `review start` prints; inside agterm it is
+// applyStart (with started).
 type startResult struct {
 	Companion *string `json:"companion"`
 	Dir       string  `json:"dir"`
-}
-
-// companionCommand builds `[env K=V…] '<agk>' <sub> '<path>'` for a companion,
-// forwarding PATH (so harnesses and agtermctl resolve even without a login
-// shell), CODEX_HOME, CLAUDE_CONFIG_DIR and AGTERMCTL. Never secrets: the
-// command line is visible in ps. sub is plain words.
-func (e *Env) companionCommand(sub, path string) (string, error) {
-	exe, err := e.Executable()
-	if err != nil {
-		return "", fmt.Errorf("locate agk binary: %v", err)
-	}
-	prefix, err := e.envCommand(exe)
-	if err != nil {
-		return "", err
-	}
-	qp, err := shellQuote(path)
-	if err != nil {
-		return "", err
-	}
-	return prefix + " " + sub + " " + qp, nil
 }
 
 // envCommand quotes argv for the login shell, prefixed with the forwarded
@@ -352,7 +288,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		}
 		state = reviewState{Change: *change}
 	}
-	root, prompt, err := e.reviewPrompt(ctx, e.Cwd, state, 1, "")
+	root, render, err := e.reviewScope(ctx, e.Cwd, state)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -361,35 +297,88 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		return e.errorf("%v", err)
 	}
 	e.warnSame(cfg)
+	w := cfg.Reviewer
+	if err := harness.CheckReviewerArgs(w.Harness, w.ExtraArgs); err != nil {
+		return e.errorf("%v", err)
+	}
 	parent := e.session()
 	if parent != "" {
 		// Refuse unquotable paths before leaving a run dir behind. The run dir
-		// lives under the root, so checking the root covers it.
-		if _, err := e.companionCommand("review run", root); err != nil {
+		// lives under the root, so checking the root covers it; the claude
+		// hooks run the agk binary through the shell too.
+		if _, err := e.envCommand(root); err != nil {
 			return e.errorf("%v", err)
+		}
+		if w.Harness == config.Claude {
+			if err := e.checkReviewerSettings(); err != nil {
+				return e.errorf("%v", err)
+			}
+			// The reviewer's out path goes into an Edit permission rule.
+			if err := harness.CheckRulePath(root); err != nil {
+				return e.errorf("%v", err)
+			}
 		}
 	}
 	dir, err := rundir.New(root, rundir.Reviews, e.Now())
 	if err != nil {
 		return e.errorf("create run dir: %v", err)
 	}
-	if err := initRound(dir, 1, prompt); err != nil {
-		return e.errorf("%v", err)
-	}
-	state.Worker = cfg.Reviewer
-	if err := rundir.WriteJSON(dir, workerFile, state); err != nil {
-		return e.errorf("record reviewer: %v", err)
-	}
+	state.Worker = w
 	if parent == "" {
 		// Outside agterm: review in the foreground. Reviewer output goes to
 		// stderr so stdout carries only the result object.
-		code := e.runRound(ctx, dir, 1, e.Stderr, reporter{env: e})
+		prompt, err := render(review.Output{})
+		if err != nil {
+			return e.errorf("render prompt: %v", err)
+		}
+		if err := initRound(dir, 1, prompt); err != nil {
+			return e.errorf("%v", err)
+		}
+		if err := rundir.WriteJSON(dir, workerFile, state); err != nil {
+			return e.errorf("record reviewer: %v", err)
+		}
+		code := e.runRound(ctx, dir, 1, e.Stderr)
 		if c := e.printJSON(startResult{Dir: dir}); c != ExitOK {
 			return c
 		}
 		return code
 	}
-	cmd, err := e.companionCommand("review run", dir)
+	return e.startInteractive(ctx, parent, root, dir, state, render)
+}
+
+// startInteractive runs the reviewer as a harness TUI in a companion of
+// parent: round 1's prompt is written with the output-file contract and a
+// single typed-in line points the reviewer at it.
+func (e *Env) startInteractive(ctx context.Context, parent, root, dir string, state reviewState, render func(review.Output) (string, error)) int {
+	w := state.Worker
+	driver, err := e.Driver(w.Harness)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	out, schema, err := prepareOut(dir)
+	if err != nil {
+		return e.errorf("prepare reviewer output: %v", err)
+	}
+	prompt, err := render(reviewOutput(w.Harness, root, schema, outputPath(dir, 1)))
+	if err != nil {
+		return e.errorf("render prompt: %v", err)
+	}
+	if err := initRound(dir, 1, prompt); err != nil {
+		return e.errorf("%v", err)
+	}
+	state.Interactive = true
+	var files harness.ReviewerFiles
+	if w.Harness == config.Claude {
+		state.Session = e.NewSessionID()
+		if files.Settings, err = e.writeReviewerSettings(dir); err != nil {
+			return e.errorf("write reviewer settings: %v", err)
+		}
+	}
+	if err := rundir.WriteJSON(dir, workerFile, state); err != nil {
+		return e.errorf("record reviewer: %v", err)
+	}
+	first := kickoff(filepath.Join(rundir.RoundDir(dir, 1), "prompt.md"))
+	cmd, err := e.envCommand(driver.InteractiveReviewer(w, root, out, files, state.Session, first)...)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -397,44 +386,64 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	name := fmt.Sprintf("%s-review #%d", cfg.Reviewer.Harness, num)
-	id, err := e.startCompanion(ctx, parent, name, cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, fmt.Sprintf("%s-review #%d", w.Harness, num), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	return e.printJSON(startResult{Companion: &id, Dir: dir})
+	started := e.handshake(ctx, reviewerWorker, id)
+	if started {
+		markStarted(dir, 1)
+	}
+	reporter{env: e, target: id}.set(ctx, "active", review.ReviewingLine(review.Label{Harness: w.Harness, Num: num, Round: 1}))
+	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: started})
 }
 
-// reviewPrompt collects the scope of a run with state from dir and renders
-// the prompt of round k: the first-round prompt, wrapped for a re-review when
-// the reviewer has a session to resume. A plan review (state.Change set)
-// reads the change from disk; a diff review diffs against state.Base. It
-// returns the repository root with the prompt.
-func (e *Env) reviewPrompt(ctx context.Context, dir string, state reviewState, k int, note string) (string, string, error) {
-	var root, body string
+// reviewOutput is the output contract of an interactive round: the reviewer
+// writes file, a codex reviewer works from out/ and so needs git -C root.
+func reviewOutput(harnessName, root, schema, file string) review.Output {
+	return review.Output{Schema: schema, File: file, Root: root, GitC: harnessName == config.Codex}
+}
+
+// reviewScope collects the scope of a run with state from dir and returns the
+// repository root and a renderer of the first-round prompt for an Output. A
+// plan review (state.Change set) reads the change from disk; a diff review
+// diffs against state.Base.
+func (e *Env) reviewScope(ctx context.Context, dir string, state reviewState) (string, func(review.Output) (string, error), error) {
 	if state.Change != "" {
 		scope, err := e.CollectPlan(ctx, dir, state.Change)
 		if err != nil {
-			return "", "", err
+			return "", nil, err
 		}
-		root = scope.Root
-		if body, err = review.PlanPrompt(scope); err != nil {
-			return "", "", fmt.Errorf("render prompt: %v", err)
-		}
-	} else {
-		scope, err := e.Collect(ctx, dir, state.Base)
-		if err != nil {
-			return "", "", err
-		}
-		root = scope.Root
-		if body, err = review.Prompt(scope); err != nil {
-			return "", "", fmt.Errorf("render prompt: %v", err)
-		}
+		return scope.Root, func(o review.Output) (string, error) { return review.PlanPrompt(scope, o) }, nil
 	}
-	if state.Session == "" {
+	scope, err := e.Collect(ctx, dir, state.Base)
+	if err != nil {
+		return "", nil, err
+	}
+	return scope.Root, func(o review.Output) (string, error) { return review.Prompt(scope, o) }, nil
+}
+
+// reviewPrompt renders the prompt of round k of a run: the first-round prompt,
+// wrapped for a re-review when the reviewer has a live session to continue
+// (always, after round 1, in an interactive run; with a recorded session id
+// inline). It returns the repository root with the prompt.
+func (e *Env) reviewPrompt(ctx context.Context, dir string, state reviewState, k int, note string, o review.Output) (string, string, error) {
+	root, render, err := e.reviewScope(ctx, dir, state)
+	if err != nil {
+		return "", "", err
+	}
+	body, err := render(o)
+	if err != nil {
+		return "", "", fmt.Errorf("render prompt: %v", err)
+	}
+	resume := state.Session != ""
+	if state.Interactive {
+		resume = k > 1
+	}
+	if !resume {
 		return root, body, nil // nothing to resume: start over
 	}
-	prompt, err := review.Rereview(body, k, note)
+	prompt, err := review.Rereview(body, k, note, o)
 	if err != nil {
 		return "", "", fmt.Errorf("render prompt: %v", err)
 	}
@@ -481,22 +490,25 @@ type sendResult struct {
 	Round     int     `json:"round"`
 }
 
-// sendHandshake bounds how long `review send` waits for the reviewer to pick
-// up the round, so a following `review wait` does not see the last round's
-// stale completed status.
-const sendHandshake = 30 * time.Second
+// defaultReviewSend is how long `review send` waits for the reviewer's turn to
+// end, seconds.
+const defaultReviewSend = 600
 
-// ReviewSend implements `agk review send <run-dir> [--note FILE]`.
+// ReviewSend implements `agk review send <run-dir> [--note FILE] [--timeout SECONDS]`.
 func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("agk review send", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	notePath := fs.String("note", "", "file with a note for the reviewer (what was fixed)")
+	timeout := fs.Int("timeout", defaultReviewSend, "seconds to wait for the reviewer's turn to end")
 	pos, code, ok := parseInterleaved(fs, args)
 	if !ok {
 		return code
 	}
 	if len(pos) != 1 {
-		return e.errorf("usage: agk review send <run-dir> [--note FILE]")
+		return e.errorf("usage: agk review send <run-dir> [--note FILE] [--timeout SECONDS]")
+	}
+	if *timeout <= 0 {
+		return e.errorf("--timeout must be a positive number of seconds, got %d", *timeout)
 	}
 	run, err := loadReviewRun(pos[0])
 	if err != nil {
@@ -510,6 +522,13 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 		}
 		note = string(b)
 	}
+	companion, err := readCompanion(run.dir)
+	if err != nil {
+		return e.errorf("%v", err)
+	}
+	if companion != "" && !run.state.Interactive {
+		return e.errorf("%s was started by an older agk and cannot take another round; start a new review", run.dir)
+	}
 	k, _ := rundir.Round(run.dir)
 	var last runResult
 	have, err := rundir.ReadJSON(rundir.RoundDir(run.dir, k), "result.json", &last)
@@ -519,22 +538,11 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 	if !have {
 		return e.errorf("round %d of %s is still running; wait for it first", k, run.dir)
 	}
-	companion, err := readCompanion(run.dir)
-	if err != nil {
-		return e.errorf("%v", err)
-	}
-	pane := ""
+	var o review.Output
 	if companion != "" {
-		b, err := os.ReadFile(filepath.Join(run.dir, paneFile))
-		if err != nil {
-			return e.errorf("reviewer pane unknown (%v); start a new review", err)
-		}
-		pane = strings.TrimSpace(string(b))
-		if !companionID.MatchString(pane) {
-			return e.errorf("%s: not a pane id: %q", filepath.Join(run.dir, paneFile), pane)
-		}
+		o = reviewOutput(run.state.Worker.Harness, run.root, filepath.Join(run.dir, schemaName), outputPath(run.dir, k+1))
 	}
-	_, prompt, err := e.reviewPrompt(ctx, run.root, run.state, k+1, note)
+	_, prompt, err := e.reviewPrompt(ctx, run.root, run.state, k+1, note, o)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -542,26 +550,23 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 		return e.errorf("%v", err)
 	}
 	if companion == "" {
-		code := e.runRound(ctx, run.dir, k+1, e.Stderr, reporter{env: e})
+		code := e.runRound(ctx, run.dir, k+1, e.Stderr)
 		if c := e.printJSON(sendResult{Dir: run.dir, Round: k + 1}); c != ExitOK {
 			return c
 		}
 		return code
 	}
-	if err := e.Ctl.MsgSend(ctx, companion+":"+pane, fmt.Sprintf("round %d", k+1)); err != nil {
+	line := kickoff(filepath.Join(rundir.RoundDir(run.dir, k+1), "prompt.md"))
+	started, err := e.typeWhenIdle(ctx, reviewerWorker, companion, line, fmt.Sprintf("round %d", k+1), time.Duration(*timeout)*time.Second, time.Time{})
+	if err != nil {
 		// The reviewer never heard of the round: take it back.
-		if rerr := rundir.SetRound(run.dir, k); rerr != nil {
-			fmt.Fprintf(e.Stderr, "agk: warning: %v\n", rerr)
-		}
-		os.RemoveAll(rundir.RoundDir(run.dir, k+1))
-		if errors.Is(err, agterm.ErrGone) {
-			return e.errorf("the reviewer is gone (%v); start a new review", err)
-		}
+		rollbackRound(run.dir, k, k+1, e.Stderr)
 		return e.errorf("%v", err)
 	}
-	if _, err := e.Ctl.Wait(ctx, companion, []string{"active"}, sendHandshake); err != nil {
-		fmt.Fprintf(e.Stderr, "agk: warning: reviewer %s did not report round %d as started: %v\n", companion, k+1, err)
+	if started {
+		markStarted(run.dir, k+1)
 	}
+	reporter{env: e, target: companion}.set(ctx, "active", review.ReviewingLine(run.label(k+1)))
 	return e.printJSON(sendResult{Companion: &companion, Dir: run.dir, Round: k + 1})
 }
 

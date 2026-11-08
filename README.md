@@ -8,7 +8,9 @@ companion in [agterm](https://agterm.app) (a native macOS terminal):
 - the **applier** implements an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change on its
   own, test first, and reports every round in a file;
 - the **reviewer** reviews the diff (or the plan of a change) read-only and returns structured
-  findings, and stays alive between rounds so a re-review remembers the earlier ones.
+  findings, and stays alive between rounds so a re-review remembers the earlier ones. In agterm it
+  is a live Claude Code or Codex session you can watch and talk to; its harness sandbox lets it
+  write only its findings file.
 
 Both can be Claude Code or Codex. You keep working in your main session; `agk` is the glue that
 starts the workers, waits for their results and hands findings back. Outside agterm the workers run
@@ -143,9 +145,14 @@ The commands print JSON; keep the `dir` they return.
 agk apply start add-json-export          # {"companion":"<id>","dir":"<run dir>","started":true}
 agk apply wait <run dir>                 # {"status":"done|blocked|needs-human|cancelled|running","round":1,...}
 
-agk review start --base main             # {"companion":"<id>","dir":"<run dir>"}
-agk review wait <run dir>                # {"status":"completed|blocked|cancelled|running","round":1,...}
+agk review start --base main             # {"companion":"<id>","dir":"<run dir>","started":true}
+agk review wait <run dir>                # {"status":"completed|blocked|needs-human|cancelled|running","round":1,...}
 ```
+
+`"started": false` means the worker did not report within a minute, usually a folder-trust or login
+prompt in its companion: answer it there, then wait. `needs-human` means the worker needs you in its
+companion: a question, a permission prompt (`reason` `permission`), or a turn that ended without its
+report or findings file (`no-report` / `no-output`). Nothing is recorded; wait again once it is done.
 
 A completed review has its findings in `<run dir>/rounds/<round>/review.json`. Send them on and
 re-review:
@@ -167,6 +174,7 @@ agk review close <review run dir>
 
 `agk --help`, `agk apply --help` and `agk review --help` list the commands and their flags; the
 timeouts (`--timeout SECONDS`) default to 3600 s for `apply wait`, 600 s for `apply send` and
+`review send` (how long they wait for the worker's turn to end before typing the next round) and
 1800 s for `review wait`. Exit codes: 0 ok, 1 error.
 
 ## Configuration
@@ -213,6 +221,9 @@ Two things to know:
 - **`--applier` and `--reviewer` take `harness[:model]` and nothing else.** `--reviewer
   codex:gpt-5.5` sets the harness and the model; effort, `extra_args` and `permission_mode` come
   from a config file.
+- **The reviewer's `extra_args` cannot widen what it may do.** `agk review start` refuses ones that
+  change its sandbox, approvals, permission mode, allowed tools, extra directories or settings
+  (for example `--sandbox`, `-c sandbox_mode=…`, `--dangerously-skip-permissions`, `--add-dir`).
 
 `agk` warns on stderr when the applier and the reviewer are the same harness and model: such a
 review is not independent.

@@ -1,4 +1,4 @@
-// Command agk wires coding-agent workflows into agterm companions and overlays.
+// Command agk runs an applier and a reviewer for coding agents in agterm companions.
 package main
 
 import (

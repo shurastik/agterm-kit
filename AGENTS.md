@@ -31,20 +31,13 @@ go mod tidy                      # Sync deps
 scripts/eval-skills.sh           # Skill evals (claude plugin eval; spends API usage, not in go test)
 ```
 
-## Install
+## Install and usage
 
-```bash
-brew install shurastik/tap/agk   # binary + skills in $(brew --prefix)/opt/agk/share/agk/skills
-agk setup                        # link agk-* skills into ~/.claude/skills and ~/.codex/skills,
-                                 # add .agk/ to the global git ignore, check dependencies
-```
+Installation, the quick start and the worker configuration (TOML layers, keys, `agk config`) are
+documented for users in [README.md](README.md); do not duplicate them here. Dev loop from a checkout:
+`go build -o .bin/agk ./cmd/agk && .bin/agk setup --skills-dir ./skills`.
 
-Rerun `agk setup` after every `brew upgrade agk`; it is idempotent (`--dry-run` previews).
-Dev loop from a checkout: `go build -o .bin/agk ./cmd/agk && .bin/agk setup --skills-dir ./skills`.
-Release: `scripts/release.sh X.Y.Z` tags, then renders `packaging/homebrew/agk.rb.tmpl` into the
-tap checkout (`$AGK_TAP_DIR`, default `~/Projects/homebrew-tap`) and pushes it.
-
-## Usage
+The commands, for an agent driving `agk` (`agk --help` has the flags):
 
 ```bash
 agk apply start <change> [--applier H[:M]]   # applier companion; prints {"companion","dir","started"}
@@ -60,22 +53,6 @@ agk review close <dir>
 agk config                                   # resolved workers and the source of every value
 agk setup [--skills-dir DIR] [--dry-run]
 agk version
-```
-
-Worker configuration (`~/.config/agk/config.toml`, or `.agk.toml` in a repo root; flags win, then
-the repo file, then the user file, then the defaults: applier `claude`, reviewer `codex`):
-
-```toml
-[applier]
-harness = "claude"             # claude | codex
-model = "claude-sonnet-5-5"    # optional; the harness default otherwise
-effort = "high"                # optional
-permission_mode = "auto"       # claude applier only; default auto
-extra_args = ["--add-dir", "../shared"]
-
-[reviewer]
-harness = "codex"
-model = "gpt-5.5"
 ```
 
 The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-review/SKILL.md` and
@@ -96,6 +73,7 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-revi
 | `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Driver, Collect, clock, ...) |
 | `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
 | `internal/setup/` | `agk setup`: skills dir resolution, link/ignore/dependency plan, apply |
+| `internal/termsafe/` | Keeps untrusted model output from driving a terminal: control characters and bidi overrides become visible escapes |
 | `internal/buildinfo/` | `Version`, stamped with `-ldflags -X` at release |
 | `assets/` | Embedded files: review schema and prompts, applier prompts and rules, claude deny settings, reviewer tool list |
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
@@ -126,6 +104,8 @@ Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/
 - Model output is untrusted: rendered through `termsafe` before it reaches a terminal, never put into
   status markdown beyond fixed strings and counts.
 - Outside agterm (`AGTERM_ENABLED` unset) workers run inline in the foreground.
+- User-facing changes update `README.md` in the same change: commands, flags, config keys and their
+  resolution, install/setup, skills. Internal refactors do not touch it.
 
 ## Workflow
 

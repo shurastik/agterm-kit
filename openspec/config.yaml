@@ -1,25 +1,30 @@
 schema: spec-driven
 
 context: |
-  agterm-kit (`agk`) is a Go CLI that integrates coding-agent workflows (Claude Code + codex)
-  with agterm, a native macOS terminal, through its `agtermctl` control-socket CLI.
+  agterm-kit (`agk`) is a Go CLI that runs two workers next to a coding-agent session, each in
+  its own terminal companion of agterm, a native macOS terminal, through its `agtermctl`
+  control-socket CLI: the applier (`agk apply`) implements an OpenSpec change and reports every
+  round in a file, the reviewer (`agk review`) reviews a diff or a change's plan read-only and
+  returns structured findings. `agk setup` links the `agk-*` agent skills that teach the main
+  session the loop.
 
-  Tech stack: Go 1.26, standard library only where possible (flag, html/template, embed,
-  os/exec, encoding/json). External binaries: `agtermctl` (agterm 0.40+), `codex` (codex-cli
-  0.166+, `codex exec --output-schema`), `git`.
+  Tech stack: Go 1.26; standard library plus `github.com/BurntSushi/toml` (the one non-stdlib
+  dependency). External binaries: `agtermctl`, `git`, `openspec`, and the `claude` and `codex`
+  CLIs, each behind a harness driver (`internal/harness`); worker harness, model and options come
+  from TOML config layers (flags, `.agk.toml`, `~/.config/agk/config.toml`, defaults).
 
-  agterm concepts: sessions, terminal companions (`session new --parent`), page companions,
-  HTML overlays (`session overlay open --html --js --block`) whose page can call the control
-  socket via `agterm.request()`, sidebar status glyphs (`session status`) and info lines
-  (`session info`), `session wait --until`.
-
-  Conventions: every external command goes through an interface with a fake for tests; codex
-  output is untrusted and is rendered only via html/template with a strict CSP; commands fall
-  back to plain terminal output when AGTERM_ENABLED is unset.
+  Conventions: every external command goes through an interface or injected func with a fake for
+  tests; model output is untrusted and reaches a terminal only through `termsafe`; worker state
+  lives on disk under `.agk/` (agterm status is only the wake-up signal); workers run inline in
+  the foreground when AGTERM_ENABLED is unset; user-facing changes update README.md.
 
 operations:
   apply:
     guidance:
+      - >-
+        Before the codex review, check README.md against the change's user-facing behavior
+        (commands, flags, config keys and their resolution, install/setup, skills) and update it
+        in the same change; internal refactors do not touch it.
       - >-
         Implementation is not done when the tasks are checked. After the last task: run the quality
         gates, then the codex review of the diff until clean, then /opsx:verify (openspec-verify-change)

@@ -1,0 +1,241 @@
+# agk
+
+Applier and reviewer companions for coding agents in the agterm terminal
+
+`agk` runs two workers next to your coding-agent session, each in its own visible terminal
+companion in [agterm](https://agterm.app) (a native macOS terminal):
+
+- the **applier** implements an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change on its
+  own, test first, and reports every round in a file;
+- the **reviewer** reviews the diff (or the plan of a change) read-only and returns structured
+  findings, and stays alive between rounds so a re-review remembers the earlier ones.
+
+Both can be Claude Code or Codex. You keep working in your main session; `agk` is the glue that
+starts the workers, waits for their results and hands findings back. Outside agterm the workers run
+inline in the foreground instead.
+
+## How it works
+
+```
+  you
+   |
+   v
++--------------------+   agk apply start / wait / send   +--------------------+
+|    main session    | --------------------------------> |  applier companion |
+| (Claude Code/Codex)|   implements the change, test     | claude or codex    |
+|                    | <-------------------------------- | writes a report    |
+|                    |   round report: done | blocked    +--------------------+
+|                    |
+|                    |   agk review start / wait / send  +--------------------+
+|                    | --------------------------------> | reviewer companion |
+|                    |   reviews the diff or the plan,   | codex or claude    |
+|                    | <-------------------------------- | read-only          |
++--------------------+   findings (review.json)          +--------------------+
+          |                                                        |
+          +---------> .agk/applies/<run>/rounds/<k>/ <-------------+
+                      .agk/reviews/<run>/rounds/<k>/
+                      (what each round was asked and what it answered)
+```
+
+The loop, with the agent skills driving it:
+
+1. `/agk-propose` writes an OpenSpec change (proposal, specs, design, tasks), has the reviewer check
+   the plan until it approves, lets you annotate it in revdiff, and stops.
+2. `agk apply start <change>` launches the applier, which works through the tasks and writes a
+   report; `agk apply wait` returns it.
+3. `agk review start` reviews the diff in the reviewer companion; `agk review wait` returns the
+   findings.
+4. Findings go to the applier with `agk apply send` for the next round, then `agk review send`
+   re-reviews in the same reviewer session. Repeat until the review approves.
+5. `agk apply close` and `agk review close` end the workers.
+
+Every round is a directory under `.agk/` in the repository (gitignored once `agk setup` has added
+`.agk/` to your global git ignore), so the state survives a restart of any of the sessions.
+
+**agterm** is a macOS terminal with a control CLI, `agtermctl`. A *companion* is a terminal session
+opened under another one; `agk` starts each worker in one and learns that a turn is over from the
+session status. **OpenSpec** keeps a feature as a *change*: a folder of artifacts (`proposal.md`,
+spec deltas, `design.md`, `tasks.md`) that is written, reviewed and implemented before it is
+archived into the project's specs.
+
+## Requirements
+
+- macOS and [agterm](https://agterm.app), which provides `agtermctl`. Without it `agk` still works,
+  with the workers running inline in the foreground.
+- `git`.
+- [`openspec`](https://github.com/Fission-AI/OpenSpec), the CLI the applier and `/agk-propose` use.
+- [`claude`](https://claude.com/claude-code) (Claude Code) and [`codex`](https://github.com/openai/codex)
+  (Codex CLI).
+- [`revdiff`](https://github.com/umputun/revdiff), optional: `/agk-propose` uses it for your pass
+  over the plan and skips that step without it.
+
+`agk setup` checks these. `git`, `codex`, `claude` and `openspec` are required: when one is missing
+`agk setup` exits 1, after it has already linked the skills. `agtermctl` and `revdiff` are reported
+as optional. That check is stricter than what a run needs: a run only starts the harnesses its
+workers are configured with (the applier is `claude` and the reviewer `codex` by default, see
+[Configuration](#configuration)), so the other CLI is needed to make `agk setup` pass, not to run a
+worker. The README names no minimum versions: none is verified.
+
+## Installation
+
+```bash
+brew install shurastik/tap/agk
+agk setup
+```
+
+`agk setup` is machine-level and idempotent; it never touches the repository you run it in. It:
+
+- links every `agk-*` skill into `~/.claude/skills` (`$CLAUDE_CONFIG_DIR/skills`) and
+  `~/.codex/skills` (`$CODEX_HOME/skills`); an agent whose config directory does not exist is
+  skipped, and a real file or directory in the way is reported as a conflict (exit 1), never
+  replaced;
+- removes `agk-*` links whose skill is no longer shipped, and the legacy `agterm-codex-review` link;
+- adds `.agk/` to your global git ignore file (`core.excludesFile`, else
+  `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`), keeping its other lines;
+- reports which dependencies it found.
+
+`agk setup --dry-run` prints those actions and changes nothing. Rerun `agk setup` after every
+`brew upgrade agk`, because the skills ship with the release. `agk version` prints the installed
+version (`dev` for a local build).
+
+The skills come from `--skills-dir`, else `$AGK_SKILLS_DIR`, else the Homebrew install
+(`$(brew --prefix)/opt/agk/share/agk/skills`).
+
+From a checkout:
+
+```bash
+go build -o .bin/agk ./cmd/agk
+.bin/agk setup --skills-dir ./skills
+```
+
+Put `.bin/agk` on your `PATH` (or call it by path) so the skills find it.
+
+## Quick start
+
+`agk setup` does not prepare your projects. In the repository you want to work on, set up OpenSpec
+first, so the project gets its `openspec-propose` skill (`/agk-propose` stops without creating
+anything when it is missing):
+
+```bash
+openspec init --tools claude    # a repository without openspec/; --tools codex for Codex
+openspec update                 # a repository that already has openspec/
+```
+
+### Through the agent
+
+Open Claude Code (or Codex) in an agterm session in that repository and describe the work:
+
+```
+/agk-propose add a --json flag to the export command
+```
+
+The agent writes the change, has the reviewer approve it and then opens it for you in revdiff;
+annotate what you want changed and quit. When you are happy with the plan, ask for the applier
+("implement the change with the applier") and, once it reports, for a review of the diff
+("review the diff"). The `agk-apply` and `agk-review` skills run the loops below for you, send the
+review findings to the applier and re-review until the review approves.
+
+### With the CLI
+
+The commands print JSON; keep the `dir` they return.
+
+```bash
+agk apply start add-json-export          # {"companion":"<id>","dir":"<run dir>","started":true}
+agk apply wait <run dir>                 # {"status":"done|blocked|needs-human|cancelled|running","round":1,...}
+
+agk review start --base main             # {"companion":"<id>","dir":"<run dir>"}
+agk review wait <run dir>                # {"status":"completed|blocked|cancelled|running","round":1,...}
+```
+
+A completed review has its findings in `<run dir>/rounds/<round>/review.json`. Send them on and
+re-review:
+
+```bash
+agk apply send <apply run dir> findings.md    # {"round":2}; or --stdin
+agk apply wait <apply run dir>
+agk review send <review run dir> --note fixed.md   # {"companion":...,"dir":...,"round":2}
+agk review wait <review run dir>
+```
+
+`agk review start --change add-json-export` reviews the plan of a change instead of a diff. When
+the loop is over:
+
+```bash
+agk apply close <apply run dir>
+agk review close <review run dir>
+```
+
+`agk --help`, `agk apply --help` and `agk review --help` list the commands and their flags; the
+timeouts (`--timeout SECONDS`) default to 3600 s for `apply wait`, 600 s for `apply send` and
+1800 s for `review wait`. Exit codes: 0 ok, 1 error.
+
+## Configuration
+
+Which harness, model and options each worker runs with comes from, strongest first:
+
+1. the flags `--applier` and `--reviewer` (`agk apply start`, `agk review start`, `agk config`);
+2. `.agk.toml` in the repository root;
+3. `~/.config/agk/config.toml` (`$XDG_CONFIG_HOME/agk/config.toml` when `XDG_CONFIG_HOME` is an
+   absolute path);
+4. the defaults: applier `claude` with `permission_mode = "auto"`, reviewer `codex`.
+
+```toml
+[applier]
+harness = "claude"             # claude | codex
+model = "claude-sonnet-5-5"    # optional; the harness default otherwise
+effort = "high"                # optional
+permission_mode = "auto"       # claude applier only; default auto
+extra_args = ["--add-dir", "../shared"]
+
+[reviewer]
+harness = "codex"
+model = "gpt-5.5"
+```
+
+Only the tables `[applier]` and `[reviewer]` and the keys above are accepted; anything else is an
+error. Values must not contain a backslash or a line break. `permission_mode` exists only on a
+`claude` applier.
+
+`agk config` prints the resolved settings of both workers as JSON, with the source of every value
+(`flag`, a file path or `default`), so you can see which layer won:
+
+```bash
+agk config
+agk config --reviewer claude:claude-opus-5-5
+```
+
+Two things to know:
+
+- **Switching the harness drops the options of the other one.** A layer that sets `harness` to a
+  different harness than the one below it discards `model`, `effort` and `extra_args` set by the
+  lower layers (and `permission_mode` when the new harness is not a `claude` applier). Set
+  `harness` together with the options it should keep in the same layer.
+- **`--applier` and `--reviewer` take `harness[:model]` and nothing else.** `--reviewer
+  codex:gpt-5.5` sets the harness and the model; effort, `extra_args` and `permission_mode` come
+  from a config file.
+
+`agk` warns on stderr when the applier and the reviewer are the same harness and model: such a
+review is not independent.
+
+## Development
+
+```bash
+go build -o .bin/agk ./cmd/agk   # build
+go test ./...                    # unit tests
+go vet ./...                     # vet
+scripts/eval-skills.sh           # skill evals
+```
+
+The unit tests never start agterm, claude or codex: every external call goes through an interface
+with a fake. The skill evals run `claude plugin eval` (Claude Code 2.1.319 or newer) with real
+Claude children on your account, so **they spend API usage**; they are not part of `go test`. See
+`evals/README.md`.
+
+Releases: `scripts/release.sh X.Y.Z` tags the version and updates the Homebrew formula in the
+`shurastik/homebrew-tap` checkout (`$AGK_TAP_DIR`, default `~/Projects/homebrew-tap`).
+`AGENTS.md` describes the repository layout and conventions for coding agents; changes are planned
+and tracked with OpenSpec under `openspec/`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

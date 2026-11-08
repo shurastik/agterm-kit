@@ -159,7 +159,7 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("render prompt: %v", err)
 	}
-	if err := initRound(dir, 1, prompt); err != nil {
+	if err := initRound(dir, 1, prompt, ""); err != nil {
 		return e.errorf("%v", err)
 	}
 	if err := rundir.WriteJSON(dir, workerFile, st); err != nil {
@@ -356,7 +356,7 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("render prompt: %v", err)
 	}
-	if err := initRound(run.dir, k, prompt); err != nil {
+	if err := initRound(run.dir, k, prompt, ""); err != nil {
 		return e.errorf("%v", err)
 	}
 	line := kickoff(filepath.Join(rundir.RoundDir(run.dir, k), "prompt.md"))

@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: fallback-findings
+description: "Fallback review has findings: the finding is reported, the reviewer stays open and nothing is verified or archived."
+plugins: ["../../case-plugins/fallback-findings"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: fallback-findings

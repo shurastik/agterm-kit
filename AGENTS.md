@@ -18,7 +18,14 @@ visible terminal companion:
 The reviewer also reviews plans: `agk review start --change <name>` checks an OpenSpec change's
 artifacts instead of a diff. The `agk-propose` skill (`/agk-propose`) runs the plan step around it:
 the project's `openspec-propose` workflow writes the change, the reviewer reviews it until it
-approves, the user annotates it in revdiff, and the skill stops before implementation.
+approves, the user annotates it in revdiff, and the skill stops before implementation. The
+`agk-explore` skill (`/agk-explore`) is the step before it: it follows the project's
+`openspec-explore` workflow and hands a settled idea to `/agk-propose` instead of `/opsx:propose`.
+The `agk-archive` skill (`/agk-archive`) is the close step: it archives through the project's
+`openspec-archive-change` only after the last code review approved the code as it is now (this
+session's own `agk review` results plus `agk review fresh`, else a fallback `agk review start
+--base`) and `openspec-verify-change` passed after it with 0 CRITICAL, then closes the change's
+applier and reviewer companions. It never commits or fixes anything.
 
 Which harness and model each role uses comes from flags, `.agk.toml` and `~/.config/agk/config.toml`.
 Installed with Homebrew; `agk setup` links the agent skills that teach the main session the loop.
@@ -55,15 +62,21 @@ agk review wait <dir> [--timeout SECONDS]    # {"status":"completed|blocked|need
 agk review send <dir> [--note FILE] [--timeout SECONDS]
                                              # re-review round, typed into the same reviewer session once its turn
                                              # is over (default 600 s)
+agk review fresh <dir>                       # {"fresh":true|false,"round":K}: read-only; does the current diff scope
+                                             # still match the current round's fingerprint (rounds/<k>/scope.sha256)?
+                                             # a plan run, a round without a fingerprint or a bad dir exits 1
 agk review close <dir>
 agk config                                   # resolved workers and the source of every value
 agk setup [--skills-dir DIR] [--dry-run]
 agk version
 ```
 
-The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-review/SKILL.md` and
-`skills/agk-propose/SKILL.md` (the plan step: `/agk-propose` writes a change, reviews it with
-`agk review start --change` and the user's revdiff pass, and stops before `agk apply`).
+The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-review/SKILL.md`,
+`skills/agk-explore/SKILL.md` (the brainstorm step: `/agk-explore` follows `openspec-explore` and
+names `/agk-propose` at the handoff), `skills/agk-propose/SKILL.md` (the plan step:
+`/agk-propose` writes a change, reviews it with `agk review start --change` and the user's revdiff
+pass, and stops before `agk apply`) and `skills/agk-archive/SKILL.md` (the close step:
+`/agk-archive` checks the review and verify gates, archives and closes the change's companions).
 
 ## Layout
 
@@ -75,7 +88,7 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-revi
 | `internal/harness/` | `Driver` per harness (claude, codex): interactive applier and reviewer argv, headless applier turn, structured inline review turn; reviewer `extra_args` guard; event-stream rendering; `RunStreaming` |
 | `internal/rundir/` | `.agk/<kind>/<run>/` directories: numbering, rounds, `worker.json` |
 | `internal/apply/` | Applier prompts and rules, round report validation, wait decision, openspec state |
-| `internal/review/` | Review scope from git, prompts (with the output-file variant) and the fix-up prompt, review JSON parse/validate, wait decision (`Decide`), info lines |
+| `internal/review/` | Review scope from git (with a working-tree fingerprint per diff round), prompts (with the output-file variant) and the fix-up prompt, review JSON parse/validate, wait decision (`Decide`), info lines |
 | `internal/cli/` | Subcommands over an injectable `Env` (Ctl, Driver, Collect, clock, ...); `worker.go` holds the plumbing both workers share (start handshake, sliced waits, typing a line once the turn is over) |
 | `internal/fsx/` | `ReplaceFile`: temp file + rename, never writes through symlinks |
 | `internal/setup/` | `agk setup`: skills dir resolution, link/ignore/dependency plan, apply |
@@ -85,10 +98,10 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-revi
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
 | `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
 | `scripts/` | `release.sh`: tag a version and bump the tap formula; `eval-skills.sh`: run the skill evals |
-| `evals/` | Eval suite of the `agk-propose` skill for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
+| `evals/` | Eval suite of the three workflow skills (`agk-propose`, `agk-explore`, `agk-archive`) for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
-`rounds/<k>/` per round (gitignored here). An interactive review run also holds `schema.json`, the
+`rounds/<k>/` per round (gitignored here; a diff review round also holds `scope.sha256`). An interactive review run also holds `schema.json`, the
 reviewer's only writable directory `out/` (it writes `out/<k>.json`) and, for claude,
 `reviewer-settings.json`.
 

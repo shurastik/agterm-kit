@@ -23,9 +23,17 @@ func scriptScope(h *tenv, root string) *[]string {
 	var seen []string
 	h.env.Collect = func(_ context.Context, dir, base string) (review.Scope, error) {
 		seen = append(seen, dir, base)
-		return review.Scope{Root: root, Base: base, MergeBase: "mb", Diff: "+x\n", Stat: " f | 1 +\n"}, nil
+		return review.Scope{Root: root, Base: base, MergeBase: "mb", Diff: "+x\n", Stat: " f | 1 +\n", Fingerprint: scopeFingerprint}, nil
 	}
 	return &seen
+}
+
+// scopeFingerprint is the fingerprint scriptScope's faked scope carries.
+const scopeFingerprint = "fp-0123456789abcdef"
+
+// scopeFile is the run-dir file holding a diff round's scope fingerprint.
+func scopeFilePath(dir string, k int) string {
+	return filepath.Join(dir, "rounds", fmt.Sprint(k), "scope.sha256")
 }
 
 func TestReviewStartNothingToReview(t *testing.T) {
@@ -724,5 +732,35 @@ func TestReviewStartRuleUnsafePathOtherModesPass(t *testing.T) {
 				t.Fatalf("exit %d: %s", code, h.err)
 			}
 		})
+	}
+}
+
+func TestReviewStartWritesScopeFingerprint(t *testing.T) {
+	for _, inAgterm := range []bool{true, false} {
+		h := newHarness(t, inAgterm)
+		root, _ := filepath.EvalSymlinks(t.TempDir())
+		scriptScope(h, root)
+		h.drivers["codex"].outputs = []string{approve}
+		if code := h.env.ReviewStart(context.Background(), nil); code != 0 {
+			t.Fatalf("agterm=%v: exit %d: %s", inAgterm, code, h.err)
+		}
+		dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+		got, err := os.ReadFile(scopeFilePath(dir, 1))
+		if err != nil || strings.TrimSpace(string(got)) != scopeFingerprint {
+			t.Errorf("agterm=%v: scope.sha256 = %q, %v", inAgterm, got, err)
+		}
+	}
+}
+
+func TestReviewStartPlanRoundHasNoScopeFingerprint(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptPlan(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	if exists(scopeFilePath(dir, 1)) {
+		t.Fatal("a plan round must not record a scope fingerprint")
 	}
 }

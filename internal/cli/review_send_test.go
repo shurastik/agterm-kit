@@ -517,3 +517,34 @@ func TestReviewSendPlanCommittedCleanTree(t *testing.T) {
 		t.Fatalf("round 2 prompt lacks the committed change:\n%s", p)
 	}
 }
+
+func TestReviewSendWritesScopeFingerprint(t *testing.T) {
+	h := newHarness(t, true)
+	root, dir := sendDir(t, h, "", true)
+	h.env.Collect = func(_ context.Context, d, base string) (review.Scope, error) {
+		return review.Scope{Root: root, Base: base, MergeBase: "mb", Diff: "+y\n", Stat: " f | 1 +\n", Fingerprint: "fp-second"}, nil
+	}
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	got, err := os.ReadFile(scopeFilePath(dir, 2))
+	if err != nil || strings.TrimSpace(string(got)) != "fp-second" {
+		t.Fatalf("scope.sha256 = %q, %v", got, err)
+	}
+	if exists(scopeFilePath(dir, 1)) {
+		t.Fatal("round 1 is not rewritten")
+	}
+}
+
+func TestReviewSendPlanRoundHasNoScopeFingerprint(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir, _ := planSendDir(t, h, "T-1", true, "TASKS\n")
+	h.ctl.WaitStatus = "active"
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if exists(scopeFilePath(dir, 2)) {
+		t.Fatal("a plan round must not record a scope fingerprint")
+	}
+}

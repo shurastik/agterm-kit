@@ -76,6 +76,9 @@ type Scope struct {
 	Diff      string
 	Stat      string
 	Untracked []UntrackedFile
+	// Fingerprint identifies the working-tree state this scope was read from;
+	// see fingerprintOf.
+	Fingerprint string
 }
 
 // Collect gathers the review scope of the repo containing dir against base.
@@ -91,20 +94,28 @@ func Collect(ctx context.Context, dir, base string) (Scope, error) {
 	}
 	s.MergeBase = strings.TrimSpace(mb)
 	exclude := ":(exclude)" + agkDir
-	if s.Diff, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase)...); err != nil {
-		return Scope{}, err
-	}
-	if s.Stat, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase, "--stat")...); err != nil {
-		return Scope{}, err
-	}
-	list, err := gitOut(ctx, s.Root, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", exclude)
-	if err != nil {
-		return Scope{}, err
-	}
-	for _, p := range strings.Split(list, "\x00") {
-		if p != "" {
-			s.Untracked = append(s.Untracked, readUntracked(s.Root, p))
+	collect := func() error {
+		var err error
+		if s.Diff, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase)...); err != nil {
+			return err
 		}
+		if s.Stat, err = gitOut(ctx, s.Root, diffArgs(s.MergeBase, "--stat")...); err != nil {
+			return err
+		}
+		list, err := gitOut(ctx, s.Root, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", exclude)
+		if err != nil {
+			return err
+		}
+		s.Untracked = nil
+		for _, p := range strings.Split(list, "\x00") {
+			if p != "" {
+				s.Untracked = append(s.Untracked, readUntracked(s.Root, p))
+			}
+		}
+		return nil
+	}
+	if s.Fingerprint, err = collectConsistent(ctx, s.Root, s.MergeBase, collect); err != nil {
+		return Scope{}, err
 	}
 	if s.Diff == "" && len(s.Untracked) == 0 {
 		return Scope{}, ErrNothingToReview

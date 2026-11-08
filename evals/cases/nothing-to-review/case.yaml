@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: nothing-to-review
+description: "Nothing to review: the skill asks the user whether to archive without a code review or which base to review against, and archives nothing."
+plugins: ["../../case-plugins/nothing-to-review"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: nothing-to-review

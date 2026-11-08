@@ -1,0 +1,4 @@
+Check results for add-widget:
+- completeness: all tasks in tasks.md are done: pass
+- correctness: requirement "List widgets" has no implementation: the `widget list` command does not exist in the code: FAIL (blocks the change)
+- coherence: the code follows design.md: pass

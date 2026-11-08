@@ -99,5 +99,110 @@ expect '^  revdiff: description file is the run dir'"'"'s revdiff-description\.m
 expect '^agk review close .*\.agk/reviews/1$'
 expect '^  close: last verdict approve$'
 expect '^agk apply start add-widget$'
+
+# --- Diff reviews, the verify and archive scripts and the archive scaffold ---
+# A second copy of the fixtures, with the outcomes the scaffold stages.
+f2="$ws/fixtures2"
+cp -R "$fix" "$f2"
+stage() { # dir [scaffold-archive options...]: a workspace with the stand-ins first on PATH
+  local d="$1"; shift
+  mkdir -p "$d"
+  (cd "$d" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-common.sh" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-archive.sh" "$@") || fail "scaffold-archive $*"
+}
+a() { PATH="$f2/bin:$PATH" EVAL_AGK_CASE="${CASE:-selftest-diff}" "$@"; }
+stage "$ws/c" --change --code --run applies:1:add-widget --run reviews:2:add-widget --run applies:3:other-change
+cd "$ws/c"
+for f in verify.sh archive.sh write-change.sh; do [ -x .eval/$f ] || fail "scaffold did not stage $f"; done
+git log --format=%s | grep -qx 'add-widget change' || fail "scaffold-archive --change did not commit the change"
+[ -f openspec/changes/add-widget/tasks.md ] || fail "scaffold-archive --change: no change files"
+[ -f widget.go ] && ! git ls-files --error-unmatch widget.go >/dev/null 2>&1 || fail "scaffold-archive --code: widget.go missing or committed"
+grep -q '"change":"add-widget"' .agk/applies/1/worker.json || fail "worker.json of applies/1"
+grep -q '"change":"add-widget"' .agk/reviews/2/worker.json || fail "worker.json of reviews/2"
+grep -q '"change":"other-change"' .agk/applies/3/worker.json || fail "worker.json of applies/3"
+if (cd "$ws/c" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-archive.sh" --bogus) 2>/dev/null; then fail "scaffold-archive accepted --bogus"; fi
+if (cd "$ws/c" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-archive.sh" --run nope:1:x) 2>/dev/null; then fail "scaffold-archive accepted a bad run kind"; fi
+
+# review start --base: a run dir with a base, a fingerprint per round.
+out="$(a agk review start --base main)" || fail "review start --base"
+d1="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+[ "$(cat "$d1/base")" = main ] || fail "start --base: no base file in $d1"
+[ -s "$d1/rounds/1/fingerprint" ] || fail "start --base: no fingerprint"
+printf '%s' "$out" | grep -q '"started":true' || fail "start --base output: $out"
+if a agk review start --base main --change add-widget 2>/dev/null; then fail "--base with --change accepted"; fi
+if a agk review start --base no-such-ref 2>/dev/null; then fail "unknown base accepted"; fi
+
+# wait plays the approve; fresh follows the workspace.
+w="$(a agk review wait "$d1")"
+printf '%s' "$w" | grep -q '"verdict":"approve"' || fail "diff wait: $w"
+[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true right after the round"
+echo "package widget" > extra.go
+[ "$(a agk review fresh "$d1")" = '{"fresh":false,"round":1}' ] || fail "fresh should turn false after a new file"
+rm extra.go
+[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true again once the file is gone"
+
+# send works on a diff run (no change dir), records a new fingerprint.
+echo "note for round 2" > note2.md
+s="$(a agk review send "$d1" --note note2.md)" || fail "send on a diff run"
+printf '%s' "$s" | grep -q '"round":2' || fail "diff send: $s"
+[ -s "$d1/rounds/2/fingerprint" ] || fail "send: no fingerprint for round 2"
+if a agk review send "$d1" 2>/dev/null; then fail "send while round 2 still runs"; fi
+[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":2}' ] || fail "fresh should follow the current round"
+
+# fresh refuses a plan run and a bad dir; edit-during-review changes the code file.
+po="$(a agk review start --change add-widget)"
+pd="$(printf '%s' "$po" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+if a agk review fresh "$pd" 2>/dev/null; then fail "fresh accepted a plan run"; fi
+if a agk review fresh "$ws" 2>/dev/null; then fail "fresh accepted a bad run dir"; fi
+mkdir -p .eval/outcomes/selftest-edit
+touch .eval/outcomes/selftest-edit/edit-during-review
+CASE=selftest-edit
+o3="$(a agk review start --base main)"
+d3="$(printf '%s' "$o3" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+a agk review wait "$d3" >/dev/null
+tail -1 widget.go | grep -q 'edited while the reviewer ran' || fail "edit-during-review did not touch widget.go"
+[ "$(a agk review fresh "$d3")" = '{"fresh":false,"round":1}' ] || fail "fresh should be false after edit-during-review"
+CASE=selftest-diff
+
+# close logs the run dir, for diff, plan and pre-created runs.
+a agk review close "$d1" || fail "close diff run"
+a agk review close .agk/reviews/2 || fail "close pre-created review run"
+a agk apply close .agk/applies/1 || fail "apply close"
+if a agk apply close "$ws" 2>/dev/null; then fail "apply close accepted a non-run dir"; fi
+
+# nothing to review: no diff and no untracked file (and a clean tree with a code file is reviewable).
+stage "$ws/e" --change
+if (cd "$ws/e" && a agk review start --base main) 2>"$ws/e.err"; then fail "start --base on a clean tree"; fi
+grep -q 'nothing to review' "$ws/e.err" || fail "nothing to review not reported: $(cat "$ws/e.err")"
+[ ! -d "$ws/e/.agk/reviews" ] || [ -z "$(ls "$ws/e/.agk/reviews")" ] || fail "nothing to review left a run dir"
+grep -q '^agk review start --base main$' "$ws/e/agk-calls.log" || fail "the refused start was not logged"
+
+# verify.sh and archive.sh.
+v="$(cd "$ws/c" && a bash .eval/verify.sh add-widget)"
+printf '%s' "$v" | grep -q 'pass' && ! printf '%s' "$v" | grep -qi 'fail' || fail "default verify results: $v"
+mkdir -p .eval/outcomes/selftest-diff
+printf 'correctness: requirement "List widgets" has no implementation: FAIL\n' > .eval/outcomes/selftest-diff/verify.txt
+v="$(a bash .eval/verify.sh add-widget)"
+printf '%s' "$v" | grep -q 'FAIL' || fail "verify.txt not printed: $v"
+rm .eval/outcomes/selftest-diff/verify.txt
+mkdir -p .eval/outcomes/selftest-verify-edit && touch .eval/outcomes/selftest-verify-edit/edit-during-verify
+o4="$(a agk review start --base main)"
+d4="$(printf '%s' "$o4" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+[ "$(a agk review fresh "$d4")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true before verify edits"
+CASE=selftest-verify-edit a bash .eval/verify.sh add-widget >/dev/null
+tail -1 widget.go | grep -q 'edited while verify ran' || fail "edit-during-verify did not touch widget.go"
+[ "$(a agk review fresh "$d4")" = '{"fresh":false,"round":1}' ] || fail "fresh should be false after edit-during-verify"
+if a bash .eval/verify.sh 2>/dev/null; then fail "verify.sh without a change"; fi
+touch .eval/outcomes/selftest-diff/archive-fail
+if a bash .eval/archive.sh add-widget 2>/dev/null; then fail "archive.sh should fail with archive-fail"; fi
+[ -d openspec/changes/add-widget ] || fail "failed archive moved the change"
+rm .eval/outcomes/selftest-diff/archive-fail
+a bash .eval/archive.sh add-widget >/dev/null || fail "archive.sh"
+[ ! -d openspec/changes/add-widget ] && [ -f openspec/changes/archive/2026-11-08-add-widget/proposal.md ] || fail "archive.sh did not move the change"
+cl="$(cat agk-calls.log)"
+for pat in '^verify add-widget$' '^archive add-widget$' '^agk review fresh .*reviews/1$' '^agk review close .*reviews/1$' '^agk apply close \.agk/applies/1$' '^agk review start --base main$'; do
+  printf '%s\n' "$cl" | grep -qE "$pat" || fail "agk-calls.log lacks /$pat/:
+$cl"
+done
+cd "$ws/b"
 [ "$(manifest)" = "$before" ] || fail "the checkout's outcomes/ changed during the self-test"
 echo "ok"

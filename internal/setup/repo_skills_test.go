@@ -38,7 +38,7 @@ func TestRepoSkillsHaveMatchingNames(t *testing.T) {
 		}
 		found[e.Name()] = true
 	}
-	for _, want := range []string{"agk-apply", "agk-review", "agk-propose"} {
+	for _, want := range []string{"agk-apply", "agk-review", "agk-propose", "agk-explore", "agk-archive"} {
 		if !found[want] {
 			t.Errorf("skill %s missing from %s", want, dir)
 		}

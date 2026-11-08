@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: changed-during-verify
+description: "Code changed during verify: the fresh check before the archive reports false, so nothing is archived and no companion is closed."
+plugins: ["../../case-plugins/changed-during-verify"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: changed-during-verify

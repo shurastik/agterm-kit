@@ -85,6 +85,19 @@ companion stays open between rounds; you close it when the loop is over.
    ```
    ⌘Z in agterm brings the companion back. Then continue the workflow (`/opsx:verify`).
 
+## Is the code still what the reviewer saw?
+
+```bash
+agk review fresh <dir>      # {"fresh":true|false,"round":K}
+```
+
+Read-only. It answers whether the diff scope is still the one the run's current round was built from
+(`fresh: true`) or changed since (`false`, also when nothing is left to review). Committing or
+staging does not change the answer, only content, file set, mode and merge base do. Exit 1 for a
+plan review, for a round written by an older agk (no fingerprint) and for a bad run dir. It starts no
+round and does not touch the companion. The `agk-archive` skill uses it to tell whether an approve
+still covers the code.
+
 ## Plan review (`--change`)
 
 To review the planning artifacts of an OpenSpec change instead of a code diff (the `agk-propose`

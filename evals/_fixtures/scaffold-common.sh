@@ -17,7 +17,7 @@ g() { git -c user.name=eval -c user.email=eval@example.invalid -c commit.gpgsign
 # The agent's Bash sandbox cannot read the repo's eval dirs: stage what the
 # stub skills and the stand-ins read into the workspace.
 mkdir -p .eval
-cp "$fix/write-change.sh" .eval/write-change.sh
+cp "$fix/write-change.sh" "$fix/verify.sh" "$fix/archive.sh" .eval/
 cp -R "$fix/outcomes" .eval/outcomes
 g init -q -b main
 mkdir -p openspec/specs openspec/changes

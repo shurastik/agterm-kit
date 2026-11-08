@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: file-added-after-approve
+description: "File added after the approve: fresh reports false and the skill runs a new review before verify and the archive."
+plugins: ["../../case-plugins/file-added-after-approve"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: file-added-after-approve

@@ -24,6 +24,9 @@ Usage:
                                   Start the next round once the reviewer's turn is over (default
                                   600 s): re-review the current diff (or the change's artifacts) in
                                   the same reviewer session; prints {"companion","dir","round"}.
+  agk review fresh <run-dir>      Read-only: whether the current diff scope still matches the
+                                  current round's fingerprint; prints {"fresh":true|false,"round":K}.
+                                  A diff review only; an empty scope is not fresh.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
   agk apply start <change> [--applier H[:M]]
                                   Start the applier for an OpenSpec change in a <harness>-apply
@@ -53,6 +56,7 @@ const reviewUsage = `Usage:
   agk review start [--base REF | --change NAME] [--reviewer H[:M]]   REF defaults to main
   agk review wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 1800
   agk review send <run-dir> [--note FILE] [--timeout SECONDS]   SECONDS defaults to 600
+  agk review fresh <run-dir>
   agk review close <run-dir>
 `
 
@@ -98,6 +102,8 @@ func (e *Env) reviewCmd(ctx context.Context, args []string) int {
 		return e.ReviewWait(ctx, args[1:])
 	case "send":
 		return e.ReviewSend(ctx, args[1:])
+	case "fresh":
+		return e.ReviewFresh(ctx, args[1:])
 	case "close":
 		return e.ReviewClose(ctx, args[1:])
 	}

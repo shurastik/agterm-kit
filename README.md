@@ -41,6 +41,8 @@ inline in the foreground instead.
 
 The loop, with the agent skills driving it:
 
+0. `/agk-explore` thinks an idea through with the project's OpenSpec explore workflow and, when it
+   is settled, hands it to `/agk-propose` instead of `/opsx:propose`.
 1. `/agk-propose` writes an OpenSpec change (proposal, specs, design, tasks), has the reviewer check
    the plan until it approves, lets you annotate it in revdiff, and stops.
 2. `agk apply start <change>` launches the applier, which works through the tasks and writes a
@@ -49,7 +51,10 @@ The loop, with the agent skills driving it:
    findings.
 4. Findings go to the applier with `agk apply send` for the next round, then `agk review send`
    re-reviews in the same reviewer session. Repeat until the review approves.
-5. `agk apply close` and `agk review close` end the workers.
+5. `/agk-archive` archives the change once the last review approved the code as it is now
+   (`agk review fresh` says whether it still is) and verify passed after it, then closes the
+   change's applier and reviewer companions. Without the skill, `agk apply close` and
+   `agk review close` end the workers.
 
 Every round is a directory under `.agk/` in the repository (gitignored once `agk setup` has added
 `.agk/` to your global git ignore), so the state survives a restart of any of the sessions.
@@ -115,8 +120,9 @@ Put `.bin/agk` on your `PATH` (or call it by path) so the skills find it.
 ## Quick start
 
 `agk setup` does not prepare your projects. In the repository you want to work on, set up OpenSpec
-first, so the project gets its `openspec-propose` skill (`/agk-propose` stops without creating
-anything when it is missing):
+first, so the project gets its `openspec-propose`, `openspec-explore`, `openspec-verify-change` and
+`openspec-archive-change` skills (`/agk-propose`, `/agk-explore` and `/agk-archive` stop without
+doing anything when theirs is missing):
 
 ```bash
 openspec init --tools claude    # a repository without openspec/; --tools codex for Codex
@@ -164,8 +170,10 @@ agk review send <review run dir> --note fixed.md   # {"companion":...,"dir":...,
 agk review wait <review run dir>
 ```
 
-`agk review start --change add-json-export` reviews the plan of a change instead of a diff. When
-the loop is over:
+`agk review start --change add-json-export` reviews the plan of a change instead of a diff.
+`agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K}`, whether
+the current diff still matches what the run's current round reviewed (committing does not change
+it, an edit does; a plan review or a round from an older agk exits 1). When the loop is over:
 
 ```bash
 agk apply close <apply run dir>

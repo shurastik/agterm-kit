@@ -1,0 +1,4 @@
+Check results for add-widget:
+- completeness: all tasks in tasks.md are done: pass
+- correctness: every requirement of the change has an implementation: pass
+- coherence: the code follows design.md: pass, with a caveat: README.md does not mention the `widget list` command, which design.md says it should (WARNING only, does not block the change)

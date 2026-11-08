@@ -1,0 +1,19 @@
+{
+  "verdict": "needs-attention",
+  "summary": "The widget list ignores the empty case.",
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "List() prints nothing for an empty project",
+      "body": "widget.go List() has an empty body, so `widget list` prints nothing and does not say that the project has no widgets.",
+      "file": "widget.go",
+      "line_start": 4,
+      "line_end": 4,
+      "confidence": 0.8,
+      "recommendation": "Print `no widgets` when the project has none."
+    }
+  ],
+  "next_steps": [
+    "Handle the empty widget list."
+  ]
+}

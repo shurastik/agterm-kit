@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: changed-during-review
+description: "Code changed during the fallback review: fresh reports false, so nothing is verified or archived."
+plugins: ["../../case-plugins/changed-during-review"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: changed-during-review

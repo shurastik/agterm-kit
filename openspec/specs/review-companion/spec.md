@@ -300,12 +300,17 @@ The reviewer SHALL be unable to modify the repository, enforced by its harness, 
 3. record round k+1;
 4. hand the round to the reviewer.
 
-Inside agterm, the round reaches the live reviewer session as one typed line, once the session's turn is over (waiting up to `--timeout`, default 600 seconds). Inline, the reviewer resumes its harness session. The command SHALL print `{"companion": <id or null>, "dir": "<run dir>", "round": k+1}`.
+Inside agterm, the round reaches the live reviewer session as one typed line, once the session's turn is over (waiting up to `--timeout`, default 600 seconds), and the command SHALL print `{"companion": "<id>", "dir": "<run dir>", "round": k+1, "started": <bool>}`, where `started` tells whether the reviewer reported the round as started. Inline, the reviewer resumes its harness session and the command SHALL print `{"companion": null, "dir": "<run dir>", "round": k+1}`.
 
 #### Scenario: Second round remembers the first
 - **GIVEN** review run D in agterm whose round 1 completed with 2 findings
 - **WHEN** the agent runs `agk review send D --note fixed.md`
-- **THEN** one line pointing at `rounds/2/prompt.md` is typed into the same reviewer session, that prompt asks it to re-check the earlier findings, includes the note and names `out/2.json` as the output file, and the outcome lands in `rounds/2/`
+- **THEN** one line pointing at `rounds/2/prompt.md` is typed into the same reviewer session, that prompt asks it to re-check the earlier findings, includes the note and names `out/2.json` as the output file, stdout carries `"round": 2` and `"started": true`, and the outcome lands in `rounds/2/`
+
+#### Scenario: Round start not confirmed
+- **GIVEN** review run D in agterm whose round 1 completed, and the reviewer does not report `active` after the line for round 2 is typed, even after the Enter retry
+- **WHEN** the agent runs `agk review send D`
+- **THEN** round 2 stays recorded, stderr carries a warning that the reviewer did not report round 2 as started and tells the user to look at the companion (press Enter if the line is still in its input box, answer a permission prompt deliberately), stdout carries `"round": 2` and `"started": false`, and the exit code is 0, so `agk review wait D` can still pick the round up once it starts
 
 #### Scenario: Nothing left to review
 - **GIVEN** a diff review run D and the diff against the recorded base is empty
@@ -350,7 +355,7 @@ Inside agterm, the round reaches the live reviewer session as one typed line, on
 #### Scenario: Re-review outside agterm
 - **GIVEN** a review run D with no companion
 - **WHEN** the agent runs `agk review send D`
-- **THEN** round 2 runs in the foreground without calling agterm and stdout ends with the JSON object whose `companion` is `null`
+- **THEN** round 2 runs in the foreground without calling agterm and stdout ends with the JSON object whose `companion` is `null` and which has no `started` field
 
 ### Requirement: Reviewer companion waits between rounds
 After each round, successful or failed, the reviewer session SHALL stay open in its companion, keeping the round visible, until `agk review send` types the next round into it or the companion is closed.
@@ -619,3 +624,49 @@ The fingerprint recorded for a round SHALL describe the same working-tree state 
 #### Scenario: Read only
 - **WHEN** the agent runs `agk review fresh <dir>` while the reviewer companion is open
 - **THEN** it does not change the run directory, start a round or call agterm
+
+### Requirement: Codex reviewer submits typed lines
+The interactive codex reviewer SHALL run with codex's paste-burst detection off (`-c tui.disable_paste_burst=true`), so that a line typed into it together with its Enter is submitted rather than kept as a multi-line draft. The flag SHALL come after the configured model, effort and `extra_args`.
+
+#### Scenario: Codex reviewer argv
+- **GIVEN** the agent runs inside agterm and the reviewer resolves to `codex` with `extra_args = ["-c", "tui.disable_paste_burst=false"]`
+- **WHEN** the agent runs `agk review start`
+- **THEN** the companion's codex command line carries `-c tui.disable_paste_burst=true` after the user's `-c tui.disable_paste_burst=false`, so paste-burst detection is off
+
+#### Scenario: Claude reviewer unchanged
+- **GIVEN** the agent runs inside agterm and the reviewer resolves to `claude`
+- **WHEN** the agent runs `agk review start`
+- **THEN** the claude command line carries no paste-burst setting
+
+### Requirement: Typed reviewer line is submitted
+After typing a round or fix-up line into the reviewer, agk SHALL wait up to 10 seconds for `active`. If it does not come, the reviewer's status is still `completed` or `idle` and the typed line is visible on the companion's screen, agk SHALL type one Enter on its own and wait for `active` or `blocked` for the rest of the 30-second handshake. It SHALL type nothing more, and no Enter when the status is anything else or the line is not on screen.
+
+#### Scenario: Enter lost, retry submits
+- **GIVEN** review run D whose round 1 completed, and the reviewer keeps the typed line for round 2 in its input box with status `completed`
+- **WHEN** the agent runs `agk review send D`
+- **THEN** after 10 seconds without `active` agk reads the companion's screen, finds the line, types one Enter alone, the reviewer reports `active`, and stdout carries `"started": true`
+
+#### Scenario: Permission prompt after typing
+- **GIVEN** the reviewer's status turns `blocked` after the round line is typed
+- **WHEN** the first 10-second wait ends without `active`
+- **THEN** agk types no Enter, the send reports `"started": false`, and the stderr warning tells the user to answer the permission prompt in the companion deliberately, without advising to press Enter
+
+#### Scenario: Permission prompt after the retry Enter
+- **GIVEN** the retry Enter submits the round line and the reviewer turns `blocked` before reporting `active`
+- **WHEN** the last wait sees `blocked`
+- **THEN** the send reports `"started": false` and the warning tells the user to answer the permission prompt deliberately, without advising to press Enter
+
+#### Scenario: Line not on screen
+- **GIVEN** the reviewer's status stays `completed` after the round line is typed, but the line is not on the last screen lines of the companion
+- **WHEN** the first 10-second wait ends without `active`
+- **THEN** agk types no Enter and keeps waiting for `active` or `blocked` until the 30-second handshake ends; if neither comes, the warning tells the user to look at the companion, without advising to press Enter
+
+#### Scenario: Fix-up line retried
+- **GIVEN** `agk review wait D` types fix-up 1 for round 1 and the reviewer keeps it in its input box with status `completed`
+- **WHEN** the first 10-second wait ends without `active`
+- **THEN** agk types one Enter alone and, once the reviewer reports `active`, records fix-up 1 as started
+
+#### Scenario: Retry bounded by the wait budget
+- **GIVEN** `agk review wait D --timeout 5` types a fix-up line with less than 10 seconds of its budget left
+- **WHEN** the budget runs out without `active`
+- **THEN** agk types no Enter and does not wait past the budget

@@ -500,6 +500,9 @@ type sendResult struct {
 	Companion *string `json:"companion"`
 	Dir       string  `json:"dir"`
 	Round     int     `json:"round"`
+	// Started is set only inside agterm: false means the line was typed but the
+	// reviewer never reported the round as started. Inline output has none.
+	Started *bool `json:"started,omitempty"`
 }
 
 // defaultReviewSend is how long `review send` waits for the reviewer's turn to
@@ -579,7 +582,7 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 		markStarted(run.dir, k+1)
 	}
 	reporter{env: e, target: companion}.set(ctx, "active", review.ReviewingLine(run.label(k+1)))
-	return e.printJSON(sendResult{Companion: &companion, Dir: run.dir, Round: k + 1})
+	return e.printJSON(sendResult{Companion: &companion, Dir: run.dir, Round: k + 1, Started: &started})
 }
 
 type freshResult struct {

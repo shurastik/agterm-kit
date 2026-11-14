@@ -37,22 +37,3 @@ not set it back to active. So `wait` sees "turn over, no report".
 **Fix idea:** treat a round as finished only when the report exists or the status has been
 done/idle for some time with no new output. Also check whether the claude hooks set `active` on a
 resumed turn (background-task notification), and set it from agk if they do not.
-
-## `agk review send` to an interactive codex reviewer does not submit the kickoff line
-
-**Seen:** 2026-11-08, rounds 2 and 3 of an interactive codex reviewer started by the checkout
-`agk` (after `interactive-reviewer`). `agk review send` printed `warning: reviewer ... did not
-report round N as started: wait timed out`. The companion showed the line
-`Read .../rounds/N/prompt.md and follow it.` in codex's input box, typed but not submitted. Round 1
-(at `start`) was fine.
-
-**Workaround used:** `agtermctl session type "$(printf '\r')" --target <companion>` submitted it,
-and the round ran normally.
-
-**Cause (suspected):** the Enter is typed in the same burst as the text and codex's TUI drops it,
-or it arrives before the input box is ready after the previous turn.
-
-**Fix idea:** send the Enter as a separate `type` call after a short delay, or after the text shows
-up in the screen buffer. If the round does not report started within a few seconds, retry the Enter
-once before the warning. Check the applier path too (`kickoff` in `internal/cli/apply.go`), since it
-uses the same mechanism.

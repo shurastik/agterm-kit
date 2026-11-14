@@ -49,9 +49,14 @@ in.
    ```bash
    agk apply send <dir> <file>       # or: ... --stdin < file
    ```
-   stdout: `{"round":K}`; then back to step 2. agk waits (default 600 s) for the applier's turn to
-   end and types one line into it pointing at the new round's prompt. Refusals (exit 1): the applier
-   is busy, waits for a permission answer, or is gone.
+   stdout: `{"round":K,"started":true}`; then back to step 2. agk waits (default 600 s) for the
+   applier's turn to end and types one line into it pointing at the new round's prompt. If `started`
+   is `false` (exit 0, the round stays recorded), the line was typed but `active` was not observed:
+   tell the user to look at the applier companion and quote the stderr warning, which names the
+   case. If the line sits unsent in the input box, they press Enter; if a permission prompt is open,
+   they answer it deliberately (never press Enter blindly). Then go back to step 2 as usual. A
+   headless round (no `started` field) goes straight to step 2.
+   Refusals (exit 1): the applier is busy, waits for a permission answer, or is gone.
 
 4. **Close** once the work is accepted (review approved, user satisfied):
    ```bash

@@ -65,3 +65,15 @@ func TestFakeWaitAndClose(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestFakeRecordsDeadlines(t *testing.T) {
+	f := &Fake{}
+	_ = f.Type(context.Background(), "C", "a")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	_ = f.Type(ctx, "C", "b")
+	want, _ := ctx.Deadline()
+	if !f.Deadlines[0].IsZero() || !f.Deadlines[1].Equal(want) {
+		t.Fatalf("deadlines = %v, want zero then %v", f.Deadlines, want)
+	}
+}

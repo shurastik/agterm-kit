@@ -34,9 +34,17 @@ func codexTuning(w config.Worker) []string {
 	return append(args, w.ExtraArgs...)
 }
 
+// codexNoPasteBurst turns off codex's paste-burst detection. agtermctl types a
+// line and its Enter in one burst; without bracketed paste codex takes that
+// burst for a paste and turns the Enter into a newline, so the line is never
+// submitted. It comes after the user's tuning, so a later -c of theirs cannot
+// turn the detection back on.
+var codexNoPasteBurst = []string{"-c", "tui.disable_paste_burst=true"}
+
 func (c *Codex) Interactive(w config.Worker, root string, _ ApplierFiles, _, kickoff string) []string {
 	argv := []string{c.Bin, "--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", root}
 	argv = append(argv, codexTuning(w)...)
+	argv = append(argv, codexNoPasteBurst...)
 	return append(argv, kickoff)
 }
 
@@ -52,6 +60,7 @@ func (c *Codex) InteractiveReviewer(w config.Worker, _, out string, _ ReviewerFi
 		"-c", "sandbox_workspace_write.writable_roots=[]",
 		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
 		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+		"-c", "tui.disable_paste_burst=true", // see codexNoPasteBurst
 		kickoff)
 }
 

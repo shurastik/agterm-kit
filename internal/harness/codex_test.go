@@ -145,7 +145,8 @@ func TestCodexInteractive(t *testing.T) {
 	d := NewCodex(Runtime{})
 	got := d.Interactive(config.Worker{Harness: config.Codex, Model: "gpt-5.5", Effort: "medium", ExtraArgs: []string{"--search"}}, "/repo", ApplierFiles{}, "", "Read /p and follow it.")
 	want := []string{"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", "/repo",
-		"-m", "gpt-5.5", "-c", `model_reasoning_effort="medium"`, "--search", "Read /p and follow it."}
+		"-m", "gpt-5.5", "-c", `model_reasoning_effort="medium"`, "--search",
+		"-c", "tui.disable_paste_burst=true", "Read /p and follow it."}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q", got)
 	}
@@ -204,6 +205,7 @@ var codexSandbox = []string{
 	"-c", "sandbox_workspace_write.writable_roots=[]",
 	"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
 	"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+	"-c", "tui.disable_paste_burst=true",
 }
 
 func TestCodexInteractiveReviewer(t *testing.T) {
@@ -228,6 +230,29 @@ func TestCodexInteractiveReviewer(t *testing.T) {
 			first := slices.Index(got, "--sandbox")
 			if first < 1+len(c.tune) {
 				t.Fatalf("--sandbox at %d, before the tuning ends at %d", first, 1+len(c.tune))
+			}
+		})
+	}
+}
+
+// A user -c tui.disable_paste_burst=false in extra_args must not win: agk's
+// =true comes later in argv, for both interactive drivers.
+func TestCodexPasteBurstOverridesUserExtraArgs(t *testing.T) {
+	d := NewCodex(Runtime{})
+	w := config.Worker{Harness: config.Codex, ExtraArgs: []string{"-c", "tui.disable_paste_burst=false"}}
+	argvs := map[string][]string{
+		"applier":  d.Interactive(w, "/repo", ApplierFiles{}, "", "kick"),
+		"reviewer": d.InteractiveReviewer(w, "/repo", "/run/out", ReviewerFiles{}, "", "kick"),
+	}
+	for name, argv := range argvs {
+		t.Run(name, func(t *testing.T) {
+			off := slices.Index(argv, "tui.disable_paste_burst=false")
+			on := slices.Index(argv, "tui.disable_paste_burst=true")
+			if off < 0 || on < 0 || on < off {
+				t.Fatalf("false at %d, true at %d in %q: agk's =true must come after the user's", off, on, argv)
+			}
+			if argv[on-1] != "-c" || argv[len(argv)-1] != "kick" {
+				t.Fatalf("argv = %q: flag must be a -c pair before the kickoff", argv)
 			}
 		})
 	}

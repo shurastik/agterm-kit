@@ -64,6 +64,8 @@ func TestCheckReviewerArgsAllowsTuning(t *testing.T) {
 		{config.Codex, []string{"-c", `model_verbosity="low"`}},
 		{config.Codex, []string{"--config", `model_verbosity="low"`}},
 		{config.Codex, []string{"--search", "--profile", "review", "-c", "tui.notifications=false"}},
+		{config.Codex, []string{"-c", "tui.disable_paste_burst=false"}},
+		{config.Codex, []string{"--config=tui.disable_paste_burst=true"}},
 		{config.Claude, []string{"--max-turns", "9", "--model", "x"}},
 		// The sandbox is codex's; claude has no such flag, and the other way round.
 		{config.Claude, []string{"--sandbox"}},

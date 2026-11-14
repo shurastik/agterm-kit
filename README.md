@@ -164,11 +164,18 @@ A completed review has its findings in `<run dir>/rounds/<round>/review.json`. S
 re-review:
 
 ```bash
-agk apply send <apply run dir> findings.md    # {"round":2}; or --stdin
+agk apply send <apply run dir> findings.md    # {"round":2,"started":true}; or --stdin
 agk apply wait <apply run dir>
-agk review send <review run dir> --note fixed.md   # {"companion":...,"dir":...,"round":2}
+agk review send <review run dir> --note fixed.md   # {"companion":...,"dir":...,"round":2,"started":true}
 agk review wait <review run dir>
 ```
+
+Inside agterm, `send` reports `started` as `start` does. `"started": false` means the line was typed
+but the worker never reported the round as started (the round stays recorded and the exit code stays
+0). Look at the companion; the stderr warning names the case. If the line sits unsent in the input
+box, press Enter there; if a permission prompt is open, answer it deliberately. Then wait as usual.
+Before giving up, agk types one Enter of its own when the line is visible on the screen and the
+worker is idle. Outside agterm the output has no `started` field.
 
 `agk review start --change add-json-export` reviews the plan of a change instead of a diff.
 `agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K}`, whether

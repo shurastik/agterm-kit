@@ -25,6 +25,8 @@ type Fake struct {
 	Calls []Call
 	// CtxErrs[i] is ctx.Err() at the time of Calls[i].
 	CtxErrs []error
+	// Deadlines[i] is ctx's deadline at the time of Calls[i]; zero when it had none.
+	Deadlines []time.Time
 
 	CompanionID  string
 	CompanionErr error
@@ -39,6 +41,8 @@ type Fake struct {
 	// WaitSeq, when non-empty, scripts successive Wait calls; each call pops
 	// the first entry. When it runs out, WaitStatus and WaitErr apply.
 	WaitSeq []WaitResult
+	// OnText, when set, runs before Text returns.
+	OnText func()
 	// OnType, when set, runs before Type returns.
 	OnType func(target, text string)
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
@@ -56,6 +60,8 @@ func (f *Fake) record(ctx context.Context, method string, args ...string) {
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: method, Args: args})
 	f.CtxErrs = append(f.CtxErrs, ctx.Err())
+	dl, _ := ctx.Deadline()
+	f.Deadlines = append(f.Deadlines, dl)
 }
 
 // Methods returns the recorded method names in order.
@@ -123,6 +129,9 @@ func (f *Fake) Type(ctx context.Context, target, text string) error {
 // Text records target and the line count.
 func (f *Fake) Text(ctx context.Context, target string, lines int) (string, error) {
 	f.record(ctx, "Text", target, fmt.Sprint(lines))
+	if f.OnText != nil {
+		f.OnText()
+	}
 	return f.TextOut, f.TextErr
 }
 

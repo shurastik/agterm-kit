@@ -211,6 +211,45 @@ func TestReviewWaitInvalidOutputGetsOneFixupThenCompletes(t *testing.T) {
 	noStatus(t, h)
 }
 
+// A fix-up line that codex keeps unsent in its input box gets one Enter of its
+// own, and the attempt is recorded as started once active arrives.
+func TestReviewWaitFixupLineNotPickedUpGetsOneEnter(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	rd := rundir.RoundDir(dir, 1)
+	fix := filepath.Join(rd, "fixup-1.md")
+	h.ctl.TextOut = "› Read " + fix + " and\n  follow it.\n" // the composer still holds the line
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Status: "completed"},    // the turn ends with an invalid file
+		{Status: "idle"},         // typeWhenIdle: the turn is over
+		{Err: agterm.ErrTimeout}, // the first wait: the line is not picked up
+		{Status: "idle"},         // current status
+		{Status: "active"},       // the Enter submits it
+	}
+	h.ctl.OnType = func(_, text string) {
+		if text == "\r" {
+			writeOut(t, dir, 1, threeFindings)
+		}
+	}
+	if code := runWait(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != completedResult+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if got := typed(h); !reflect.DeepEqual(got, []string{"Read " + fix + " and follow it.\r", "\r"}) {
+		t.Fatalf("typed = %q: the line, then one Enter alone", got)
+	}
+	if !exists(fixupStartedFile(rd, 1)) || !roundStarted(dir, 1) {
+		t.Fatal("the fix-up must be recorded as started once active arrives")
+	}
+	if h.err.Len() != 0 {
+		t.Fatalf("stderr = %q: a recovered fix-up warns about nothing", h.err)
+	}
+	noStatus(t, h)
+}
+
 func TestReviewWaitThreeInvalidOutputsBlockTheRound(t *testing.T) {
 	h := newHarness(t, true)
 	dir := idir(t)

@@ -353,9 +353,9 @@ func TestApplySend(t *testing.T) {
 	assertCalls(t, h.ctl,
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "10m0s"}},
 		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
-		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "30s"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
 	)
-	if h.out.String() != `{"round":2}`+"\n" {
+	if h.out.String() != `{"round":2,"started":true}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
 }
@@ -425,7 +425,7 @@ func TestApplySendHandshakeTimeoutWarns(t *testing.T) {
 	if code := runApply(h, "send", dir, msg); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if !strings.Contains(h.err.String(), "did not report round 2 as started") || h.out.String() != "{\"round\":2}\n" {
+	if !strings.Contains(h.err.String(), "did not report round 2 as started") || h.out.String() != "{\"round\":2,\"started\":false}\n" {
 		t.Fatalf("stderr %q stdout %q", h.err, h.out)
 	}
 	if k, _ := rundir.Round(dir); k != 2 {

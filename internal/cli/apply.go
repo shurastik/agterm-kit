@@ -310,8 +310,13 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 	return e.printJSON(apply.Decide(run.round, report, status, werr))
 }
 
+// sendRound is the stdout of `apply send`. Started is set only inside agterm,
+// where false means the line was typed but the applier never reported the round
+// as started (most likely it sits in the input box); inline output has no
+// such field.
 type sendRound struct {
-	Round int `json:"round"`
+	Round   int   `json:"round"`
+	Started *bool `json:"started,omitempty"`
 }
 
 // ApplySend implements `agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]`.
@@ -383,7 +388,7 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if started {
 		markStarted(run.dir, k)
 	}
-	return e.printJSON(sendRound{Round: k})
+	return e.printJSON(sendRound{Round: k, Started: &started})
 }
 
 // ApplyClose implements `agk apply close <run-dir>`.

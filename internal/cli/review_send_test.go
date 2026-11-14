@@ -72,14 +72,14 @@ func TestReviewSendSecondRound(t *testing.T) {
 	assertCalls(t, h.ctl,
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "10m0s"}},
 		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
-		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "30s"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
 		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r2: reviewing"}},
 	)
 	noStatus(t, h)
 	if !roundStarted(dir, 2) {
 		t.Fatal("a confirmed handshake marks round 2 started")
 	}
-	if want := `{"companion":"C-1","dir":"` + dir + `","round":2}` + "\n"; h.out.String() != want {
+	if want := `{"companion":"C-1","dir":"` + dir + `","round":2,"started":true}` + "\n"; h.out.String() != want {
 		t.Fatalf("stdout = %q", h.out)
 	}
 }
@@ -219,8 +219,14 @@ func TestReviewSendHandshakeTimeoutWarns(t *testing.T) {
 	if code := runSend(h, dir); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if !strings.Contains(h.err.String(), "did not report round 2 as started") || !strings.Contains(h.out.String(), `"round":2`) {
-		t.Fatalf("stderr %q stdout %q", h.err, h.out)
+	if !strings.Contains(h.err.String(), "did not report round 2 as started") {
+		t.Fatalf("stderr %q", h.err)
+	}
+	if want := `{"companion":"C-1","dir":"` + dir + `","round":2,"started":false}` + "\n"; h.out.String() != want {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if k, _ := rundir.Round(dir); k != 2 {
+		t.Fatalf("round = %d, want 2 kept", k)
 	}
 	if roundStarted(dir, 2) {
 		t.Fatal("an unconfirmed round must not be marked started")

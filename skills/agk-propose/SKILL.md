@@ -80,6 +80,11 @@ artifacts; a passing round counts only for the files that still match its manife
    agk review send <dir> --note <note file>
    ```
    Every `agk review send` of this run, a retry after `blocked` included, goes through this item.
+   Its stdout carries `"started":true|false`. On `"started": false` (exit 0, the round stays
+   recorded) tell the user to look at the reviewer companion and quote the stderr warning, which
+   names the case: if the line sits unsent in the input box, they press Enter; if a permission
+   prompt is open, they answer it deliberately. Then wait as usual. An inline send has no `started`
+   field and goes straight to the wait.
 
 Do not close the reviewer here: every later change to the artifacts goes through another round.
 

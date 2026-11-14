@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/fsx"
@@ -25,6 +27,13 @@ const (
 	startHandshake = 60 * time.Second // companion must report a status by then
 	handshakeLines = 20               // screen lines shown when it does not
 	sendHandshake  = 30 * time.Second // a typed line must turn the status active by then
+
+	// sendFirstHandshake is how long a typed line gets to turn the status
+	// active before agk looks at the screen and, if the line sits unsent in
+	// the input box, types one Enter on its own.
+	sendFirstHandshake = 10 * time.Second
+	// statusCheck bounds the "what is the status now" query before that Enter.
+	statusCheck = time.Second
 )
 
 // workerRole names a worker in messages.
@@ -139,19 +148,115 @@ func (e *Env) typeWhenIdle(ctx context.Context, w workerRole, companion, line, w
 		}
 		return false, fmt.Errorf("type into %s %s: %v", w.name, companion, err)
 	}
-	hs := sendHandshake
-	if !deadline.IsZero() {
-		hs = min(hs, deadline.Sub(e.Now()))
+	end := e.Now().Add(sendHandshake)
+	if !deadline.IsZero() && deadline.Before(end) {
+		end = deadline
 	}
-	if hs <= 0 {
-		fmt.Fprintf(e.Stderr, "agk: warning: %s %s did not report %s as started: no time left to wait\n", w.name, companion, what)
-		return false, nil
-	}
-	if _, err := e.Ctl.Wait(ctx, companion, []string{"active"}, hs); err != nil {
-		fmt.Fprintf(e.Stderr, "agk: warning: %s %s did not report %s as started: %v\n", w.name, companion, what, err)
+	if why, hint := e.confirmStart(ctx, companion, line, end); why != "" {
+		fmt.Fprintf(e.Stderr, "agk: warning: %s %s did not report %s as started: %s; %s\n", w.name, companion, what, why, hint)
 		return false, nil
 	}
 	return true, nil
+}
+
+// What the warning tells the user to do, by why the line was not confirmed.
+// Enter is advised only when the line is known to sit in the input box: with a
+// permission prompt open it could approve the prompt. Once an Enter has been
+// typed after the screen was read, the screen no longer proves an unsent line,
+// so only the conditional hintLook is left.
+const (
+	hintInputBox = "the line may still be in its input box: press Enter in the companion"
+	hintPrompt   = "the worker shows a permission prompt: look at the companion and answer it deliberately"
+	hintLook     = "look at the companion: if the line is still in its input box, press Enter there; if it asks for permission, answer it deliberately"
+)
+
+// confirmStart waits until end for the worker to report the line it was just
+// typed as started, and returns "" when it did, else why not and a hint for
+// the user. It is two steps: a first wait for active, then, only when the turn
+// is still over and the line is visible on the screen (so it sits unsent in
+// the input box), one Enter typed on its own and a wait for the rest of the
+// budget. Nothing is typed when the status is anything else, as an Enter could
+// answer a permission prompt.
+//
+// Every agtermctl call is its own process and takes real time, so the budget
+// is read off Env.Now before each step, and all calls run under one context
+// that ends with the budget: Text and Type take no timeout of their own and
+// Wait rounds its up. Any error here means "not started", never a refusal,
+// because the line is typed and the round stays recorded.
+func (e *Env) confirmStart(ctx context.Context, companion, line string, end time.Time) (why, hint string) {
+	left := func() time.Duration { return end.Sub(e.Now()) }
+	if left() <= 0 {
+		return "no time left to wait", hintLook
+	}
+	ctx, cancel := context.WithTimeout(ctx, left())
+	defer cancel()
+
+	first := min(sendFirstHandshake, left())
+	_, err := e.Ctl.Wait(ctx, companion, []string{"active"}, first)
+	if err == nil {
+		return "", ""
+	}
+	if !errors.Is(err, agterm.ErrTimeout) || left() <= 0 {
+		return err.Error(), hintLook
+	}
+	status, err := e.Ctl.Wait(ctx, companion, []string{"active", "completed", "idle", "blocked"}, min(statusCheck, left()))
+	if err != nil {
+		return err.Error(), hintLook
+	}
+	switch status {
+	case "active":
+		return "", ""
+	case "completed", "idle":
+	case "blocked":
+		return "the status is \"blocked\"", hintPrompt
+	default:
+		return "the status is " + strconv.Quote(status), hintLook
+	}
+	if left() <= 0 {
+		return "no time left to wait", hintLook
+	}
+	screen, err := e.Ctl.Text(ctx, companion, handshakeLines)
+	if err != nil {
+		return err.Error(), hintLook
+	}
+	hint = hintLook
+	if lineOnScreen(screen, line) {
+		hint = hintInputBox // known to be unsent, until an Enter is typed
+		if left() <= 0 {
+			return "no time left to wait", hint
+		}
+		hint = hintLook // the Enter changes what the screen showed
+		if err := e.Ctl.Type(ctx, companion, "\r"); err != nil {
+			return err.Error(), hint
+		}
+	}
+	if left() <= 0 {
+		return "no time left to wait", hint
+	}
+	status, err = e.Ctl.Wait(ctx, companion, []string{"active", "blocked"}, left())
+	switch {
+	case err != nil:
+		return err.Error(), hint
+	case status == "blocked":
+		return "the status is \"blocked\"", hintPrompt
+	}
+	return "", ""
+}
+
+// lineOnScreen reports whether line is among the screen's text, ignoring all
+// whitespace: codex wraps a long path across rows and indents the next one.
+// The screen is read only for this decision and never shown.
+func lineOnScreen(screen, line string) bool {
+	return strings.Contains(stripSpace(screen), stripSpace(line))
+}
+
+func stripSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // rollbackRound takes back round k after its line was never delivered:

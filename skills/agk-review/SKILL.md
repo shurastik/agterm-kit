@@ -68,10 +68,15 @@ companion stays open between rounds; you close it when the loop is over.
    ```bash
    agk review send <dir> --note <file>   # the note (optional) says what was fixed or set aside
    ```
-   stdout: `{"companion":…,"dir":…,"round":K}`. The round is typed into the same live reviewer
-   session once its turn is over (`--timeout SECONDS` bounds that wait, default 600); it checks its
-   earlier findings and looks for regressions. Then back to step 2. Refusals (exit 1, nothing typed,
-   no round recorded):
+   stdout: `{"companion":…,"dir":…,"round":K,"started":true}`. The round is typed into the same live
+   reviewer session once its turn is over (`--timeout SECONDS` bounds that wait, default 600); it
+   checks its earlier findings and looks for regressions. Then back to step 2. If `started` is
+   `false` (exit 0, the round stays recorded), the line was typed but `active` was not observed:
+   tell the user to look at the reviewer companion and quote the stderr warning, which names the
+   case. If the line sits unsent in the input box, they press Enter; if a permission prompt is open,
+   they answer it deliberately (never press Enter blindly). Then go on with step 2 as usual. An
+   inline review (no `started` field) goes straight to step 2.
+   Refusals (exit 1, nothing typed, no round recorded):
    - the round is still running: wait first;
    - `nothing to review`;
    - the reviewer is busy (its turn did not end in time): wait for it or raise `--timeout`;

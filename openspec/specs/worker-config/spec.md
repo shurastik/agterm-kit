@@ -7,12 +7,17 @@ from command-line flags, an optional per-repository file, a per-user file and bu
 ## Requirements
 
 ### Requirement: Worker roles and defaults
-agk SHALL know two worker roles, `applier` and `reviewer`. Each SHALL resolve to a harness (`claude` or `codex`) plus optional `model`, `effort` and `extra_args`; a claude applier also has `permission_mode` (default `auto`). Without any configuration the applier SHALL be `claude` and the reviewer `codex`, both with the harness's own default model.
+agk SHALL know two worker roles, `applier` and `reviewer`. Each SHALL resolve to a harness (`claude` or `codex`) plus optional `model`, `effort` and `extra_args`; a claude applier also has `permission_mode` (default `auto`), and the applier of either harness has `worktree` (default `false`), which a harness switch keeps. Without any configuration the applier SHALL be `claude` and the reviewer `codex`, both with the harness's own default model.
 
 #### Scenario: No configuration at all
 - **GIVEN** no config files exist and no worker flags are passed
 - **WHEN** the user runs `agk config`
-- **THEN** it reports applier harness `claude` with `permission_mode` `auto` and reviewer harness `codex`, each with no model, no effort and no extra args, and source `default`
+- **THEN** it reports applier harness `claude` with `permission_mode` `auto` and `worktree` `false`, and reviewer harness `codex`, each with no model, no effort and no extra args, and source `default`
+
+#### Scenario: Harness switch keeps worktree
+- **GIVEN** the user file sets `[applier] harness = "claude"` and `worktree = true`
+- **WHEN** the user runs `agk config --applier codex`
+- **THEN** the applier is `codex` with `worktree` `true` from the user file
 
 ### Requirement: Configuration sources and precedence
 For each role key, agk SHALL take the value from the first source that sets it: the role flag, then `.agk.toml` in the repository root, then `$XDG_CONFIG_HOME/agk/config.toml` (default `~/.config/agk/config.toml`), then the built-in default. A missing file SHALL be skipped silently.
@@ -28,7 +33,7 @@ For each role key, agk SHALL take the value from the first source that sets it: 
 - **THEN** the applier model is `claude-sonnet-5-5` with source `/x/agk/config.toml`
 
 ### Requirement: Role flag
-`agk apply start` SHALL accept `--applier HARNESS[:MODEL]` and `agk review start` and `agk config` SHALL accept `--reviewer HARNESS[:MODEL]` (`agk config` both). When the flag names a harness other than the one the files resolve to, the file values for `model`, `effort`, `extra_args` and `permission_mode` SHALL be dropped for that role.
+`agk apply start` SHALL accept `--applier HARNESS[:MODEL]` and `agk review start` and `agk config` SHALL accept `--reviewer HARNESS[:MODEL]` (`agk config` both). When the flag names a harness other than the one the files resolve to, the file values for `model`, `effort`, `extra_args` and `permission_mode` SHALL be dropped for that role. `agk apply start` SHALL also accept `--worktree` and `--no-worktree`, which set the applier's `worktree` to true or false with source `flag`; passing both SHALL be refused.
 
 #### Scenario: Model override for one run
 - **GIVEN** the user file sets `[reviewer] harness = "codex"` and `effort = "high"`
@@ -44,8 +49,17 @@ For each role key, agk SHALL take the value from the first source that sets it: 
 - **WHEN** the user passes `--applier gemini` or `--applier claude:`
 - **THEN** the command exits 1 with an error naming the flag and the accepted harnesses, before any companion or run directory is created
 
+#### Scenario: Worktree off for one run
+- **GIVEN** the user file sets `[applier] worktree = true`
+- **WHEN** the user runs `agk apply start add-auth --no-worktree`
+- **THEN** the applier runs in the main checkout, and no worktree, pull or commit happens
+
+#### Scenario: Both worktree flags
+- **WHEN** the user runs `agk apply start add-auth --worktree --no-worktree`
+- **THEN** the command exits 1 naming both flags, before any pull, commit, worktree, companion or run directory
+
 ### Requirement: Configuration validation
-agk SHALL reject a config file that is not valid TOML, has a table other than `[applier]` and `[reviewer]`, a key it does not know, an unknown harness, a value of the wrong type, `permission_mode` outside `[applier]` or for a codex applier, or an `extra_args` entry containing a backslash or a line break. The error SHALL name the file and the offending table or key, and the command SHALL exit 1 without starting a worker.
+agk SHALL reject a config file that is not valid TOML, has a table other than `[applier]` and `[reviewer]`, a key it does not know, an unknown harness, a value of the wrong type, `permission_mode` outside `[applier]` or for a codex applier, `worktree` outside `[applier]`, or an `extra_args` entry containing a backslash or a line break. The error SHALL name the file and the offending table or key, and the command SHALL exit 1 without starting a worker.
 
 #### Scenario: Typo in a key
 - **GIVEN** `.agk.toml` contains `[reviewer] modle = "x"`
@@ -57,6 +71,16 @@ agk SHALL reject a config file that is not valid TOML, has a table other than `[
 - **WHEN** the user runs `agk apply start c`
 - **THEN** it exits 1 with an error naming `applier.extra_args`
 
+#### Scenario: Worktree on the reviewer
+- **GIVEN** `.agk.toml` contains `[reviewer] worktree = true`
+- **WHEN** the user runs `agk config`
+- **THEN** it exits 1 with an error naming `.agk.toml` and `reviewer.worktree`
+
+#### Scenario: Worktree of the wrong type
+- **GIVEN** `.agk.toml` contains `[applier] worktree = "yes"`
+- **WHEN** the user runs `agk apply start c`
+- **THEN** it exits 1 with an error naming `.agk.toml` and `applier.worktree`, and no worktree, commit or run directory is created
+
 ### Requirement: Run pinned to its resolved configuration
 Each run directory SHALL record the worker configuration resolved when it was started, and every later step of that run (follow-up rounds, resume, inline continuation) SHALL use the recorded configuration, ignoring later changes to the files.
 
@@ -66,12 +90,17 @@ Each run directory SHALL record the worker configuration resolved when it was st
 - **THEN** round 2 still resumes the codex session
 
 ### Requirement: Show the resolved configuration
-`agk config [--applier H[:M]] [--reviewer H[:M]]` SHALL print one JSON object with an `applier` and a `reviewer` entry, each listing `harness`, `model`, `effort`, `extra_args` and, for a claude applier, `permission_mode`, and for every key the source it came from (`flag`, a file path, or `default`). It SHALL exit 1 on any validation error.
+`agk config [--applier H[:M]] [--reviewer H[:M]]` SHALL print one JSON object with an `applier` and a `reviewer` entry, each listing `harness`, `model`, `effort`, `extra_args`, for a claude applier `permission_mode`, and for the applier `worktree`, and for every key the source it came from (`flag`, a file path, or `default`). It SHALL exit 1 on any validation error.
 
 #### Scenario: Sources shown per key
 - **GIVEN** `.agk.toml` sets `[applier] effort = "high"` and nothing else is configured
 - **WHEN** the user runs `agk config`
 - **THEN** the applier entry has `effort` `high` with source `<repo>/.agk.toml` and `harness` `claude` with source `default`
+
+#### Scenario: Worktree source shown
+- **GIVEN** the user file sets `[applier] worktree = true`
+- **WHEN** the user runs `agk config`
+- **THEN** the applier entry has `worktree` `true` with the user file as its source
 
 ### Requirement: Same worker on both roles is flagged
 When the applier and the reviewer resolve to the same harness and the same model (an unset model counts as the same), `agk config`, `agk apply start` and `agk review start` SHALL print a warning on stderr that the review is not independent, and SHALL still proceed.

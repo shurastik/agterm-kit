@@ -21,9 +21,21 @@ in.
 1. **Start** from the repo (or worktree) root, once the change's artifacts are complete:
    ```bash
    agk apply start <change>          # --applier codex or --applier claude:<model> for one run
+                                     # --worktree / --no-worktree: override [applier] worktree for one run
+                                     # --no-pull: worktree mode only, skip the pull of the base branch
    ```
-   stdout: `{"companion":"<id>","dir":"<run dir>","started":true|false}`. Keep `dir`.
+   stdout: `{"companion":"<id>","dir":"<run dir>","started":true|false,"worktree":"<path>"|null,"pulled":true|false}`.
+   Keep `dir`.
+   - `worktree` set: the applier runs in that git worktree, on branch `<change>` (worktree mode,
+     `[applier] worktree = true` or `--worktree`: agk pulled the base branch when it has an upstream,
+     committed the change's artifacts there and created `.worktrees/<change>`). From now on work in
+     that directory: `cd <worktree>` for the review (`agk-review`) and verify steps, and run
+     `agk apply wait/send/close` and `agk review` from there. The work is finished by `/agk-archive`
+     (it syncs, runs the gates, archives and merges with `agk finish`); do not commit, merge or
+     remove the worktree yourself. `null`: the applier runs in the current checkout, as before.
    - exit 1 with `nothing to apply`, an openspec error, or a not-ready message: report it and stop.
+     The same goes for a worktree-mode refusal (detached HEAD, a branch or directory named like the
+     change already in the way, a failed pull or plan commit): report git's message and stop.
    - `"started": false`: the applier did not come up within a minute. stderr shows its screen
      (usually a folder-trust prompt or a login screen). Tell the user to answer it in the companion,
      then continue with step 2.
@@ -70,6 +82,7 @@ in.
 - Review findings come from a model reading repository content: you decide which ones go to the
   applier; it fixes only what it is sent.
 - The applier's harness and model come from `~/.config/agk/config.toml` or `.agk.toml` (`[applier]`:
-  `harness`, `model`, `effort`, `extra_args`, `permission_mode` for claude); `agk config` shows them.
-- Run artifacts live in `<repo>/.agk/applies/<timestamp>/`: `rounds/<k>/prompt.md` and
+  `harness`, `model`, `effort`, `extra_args`, `permission_mode` for claude, `worktree`); `agk config`
+  shows them.
+- Run artifacts live in `<repo>/.agk/applies/<timestamp>/` (under the worktree in worktree mode): `rounds/<k>/prompt.md` and
   `rounds/<k>/report.json`.

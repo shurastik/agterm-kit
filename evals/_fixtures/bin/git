@@ -1,0 +1,11 @@
+#!/bin/bash
+# Stand-in for Apple's /usr/bin/git, which fails inside the agent's Bash
+# sandbox (xcrun wants a cache file outside it). The cases where the agent runs
+# git itself (a change worktree: branch detection, the code and archive
+# commits) put this first on PATH; it runs the real binary behind the shim.
+set -uo pipefail
+self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+for c in /Library/Developer/CommandLineTools/usr/bin/git /Applications/Xcode.app/Contents/Developer/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git; do
+  if [ -x "$c" ] && [ "$c" != "$self" ] && "$c" --version >/dev/null 2>&1; then exec "$c" "$@"; fi
+done
+exec /usr/bin/git "$@"

@@ -35,6 +35,7 @@ type Layer struct {
 	Effort         *string   `toml:"effort"`
 	ExtraArgs      *[]string `toml:"extra_args"`
 	PermissionMode *string   `toml:"permission_mode"`
+	Worktree       *bool     `toml:"worktree"`
 }
 
 // File is a parsed config file.
@@ -107,6 +108,9 @@ func (l *Layer) validate(role string) error {
 		if l.Harness != nil && *l.Harness == Codex {
 			return fmt.Errorf("%s.permission_mode: a codex applier has no permission mode", role)
 		}
+	}
+	if l.Worktree != nil && role != Applier {
+		return fmt.Errorf("%s.worktree: only the applier has a worktree mode", role)
 	}
 	for key, v := range map[string]*string{"harness": l.Harness, "model": l.Model, "effort": l.Effort, "permission_mode": l.PermissionMode} {
 		if v != nil {

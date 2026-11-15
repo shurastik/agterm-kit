@@ -65,6 +65,8 @@ func TestLoadInvalid(t *testing.T) {
 		"extra arg backslash":  {"[applier]\nextra_args = [\"a\\\\b\"]\n", "applier.extra_args"},
 		"model line break":     {"[reviewer]\nmodel = \"a\\rb\"\n", "reviewer.model"},
 		"empty harness":        {"[reviewer]\nharness = \"\"\n", "reviewer.harness"},
+		"worktree on reviewer": {"[reviewer]\nworktree = true\n", "reviewer.worktree"},
+		"worktree wrong type":  {"[applier]\nworktree = \"yes\"\n", "applier.worktree"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -80,5 +82,20 @@ func TestLoadInvalid(t *testing.T) {
 				t.Errorf("error %q does not name %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadWorktree(t *testing.T) {
+	f, err := LoadFile(writeFile(t, "[applier]\nworktree = true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := f.Roles[Applier]
+	if a == nil || a.Worktree == nil || !*a.Worktree {
+		t.Fatalf("applier = %+v", a)
+	}
+	// worktree is valid for a codex applier too (unlike permission_mode)
+	if _, err := LoadFile(writeFile(t, "[applier]\nharness = \"codex\"\nworktree = false\n")); err != nil {
+		t.Fatal(err)
 	}
 }

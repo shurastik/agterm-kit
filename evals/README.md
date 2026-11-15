@@ -26,11 +26,12 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `cases/<case>/` | One case per scenario of a workflow skill (see the table below): `case.yaml`, `prompt.md`, `scaffold.sh`, `graders/*.md` |
 | `case-plugins/<case>/` | The plugin each case loads (`case.yaml` `plugins:`): manifest plus symlinks to the skill under test (`skills/agk-propose`, `skills/agk-explore` or `skills/agk-archive`) and the stubs that case needs |
 | `_fixtures/bin/agk`, `_fixtures/bin/revdiff` | Stand-ins |
+| `_fixtures/bin/git` | Runs the real git binary behind Apple's `/usr/bin/git` shim, which fails in the agent's Bash sandbox; the worktree cases need it because the agent runs git itself there |
 | `_fixtures/stubs/openspec-propose`, `openspec-explore`, `openspec-verify-change`, `openspec-archive-change`, `revdiff` (under `_fixtures/stubs/`) | Stub skills |
 | `_fixtures/write-change.sh` | Writes the fixed change `add-widget` for the `openspec-propose` stub |
 | `_fixtures/verify.sh`, `_fixtures/archive.sh` | Check results and archive step for the `openspec-verify-change` and `openspec-archive-change` stubs |
-| `_fixtures/scaffold-archive.sh` | Archive-case workspace: the change `add-widget`, an uncommitted code file, pre-created `.agk/` runs |
-| `_fixtures/outcomes/<case>/` | Per-case outcomes: review rounds (`round-<k>.json`), revdiff annotations (`revdiff-<n>.txt`), verify results (`verify.txt`), markers `edit-during-review`, `edit-during-verify` and `archive-fail` |
+| `_fixtures/scaffold-archive.sh` | Archive-case workspace: the change `add-widget`, an uncommitted code file, pre-created `.agk/` runs; `--worktree` makes the workspace a linked worktree of a main repository next to it (`<workspace>.main`) on branch `add-widget` with `branch.add-widget.agkBase = main`, `--main-branch` stands the workspace repository itself on that branch with the base recorded, `--branch` does the same without a recorded base |
+| `_fixtures/outcomes/<case>/` | Per-case outcomes: review rounds (`round-<k>.json`), revdiff annotations (`revdiff-<n>.txt`), verify results (`verify.txt`), markers `edit-during-review`, `edit-during-verify` and `archive-fail`, and the worktree markers `sync-rebased-<n>`, `sync-conflict`, `edit-after-sync-<n>` and `finish-fail` |
 | `_fixtures/scaffold-common.sh` | Shared scaffold: PATH guard, `.eval/` staging, git repo with an `openspec/` skeleton |
 | `_fixtures/test.sh` | Self-test of the stand-ins and the PATH guard (no model, no cost) |
 
@@ -56,6 +57,25 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `verify-critical` | `agk-archive` | Verify reports CRITICAL (also the broken-skill check) |
 | `verify-warnings` | `agk-archive` | Verify reports warnings only |
 | `archive-failed` | `agk-archive` | Archive failed |
+| `worktree-archive` | `agk-archive` | Change worktree detection, Fallback review in a change worktree, Code committed and synced first, Finish succeeds, Archive done in a change worktree |
+| `worktree-sync-conflict` | `agk-archive` | Sync conflict |
+| `worktree-gate-fails` | `agk-archive` | Gate fails in a change worktree |
+| `worktree-verified-then-rebased` | `agk-archive` | Verified before a rebasing sync |
+| `worktree-base-moved` | `agk-archive` | Base moved during the gates |
+| `worktree-finish-fails` | `agk-archive` | Finish fails |
+| `worktree-archive-failed` | `agk-archive` | Archive failed in a change worktree |
+| `worktree-code-after-gates` | `agk-archive` | Code changed after the gates |
+| `branch-in-main-checkout` | `agk-archive` | Change branch checked out in the main checkout |
+| `branch-without-base` | `agk-archive` | Branch without a recorded base |
+
+The worktree cases run in a real linked worktree: the scaffold builds a main repository next to the
+workspace (on `main`, with the plan commit) and attaches the workspace to it on branch `add-widget`
+with `branch.add-widget.agkBase = main`, which is what the skill detects. Branch state alone would put
+the main checkout in the workspace, where a careful agent rightly refuses `agk finish`. The stand-in
+`agk` finds the workspace through `git config eval.workspace`, so it logs and plays its outcomes there
+even when the skill runs `agk finish` from the main checkout. The child's own `git commit` runs in the
+repository (the harness disables git hooks, so the commits are not in `agk-calls.log`): the graders
+match them in the trace, in order with the stand-in's calls, which the trace holds too.
 
 In the in-session archive cases the prompt first asks the agent to set the session up (run the
 review, run it and verify, create a file, run two rounds, or run a review as `other-change`'s code
@@ -68,7 +88,12 @@ review) and then to run the `agk-archive` skill.
   and `changed since round <k>: <files>` at `send`, `close: last verdict <v>` at `close`. It plays the
   case's outcomes chosen by `EVAL_AGK_CASE` (`case.yaml` `execution.env`): `wait` writes
   `rounds/<k>/review.json` from `round-<k>.json`, or an approve when there is none. `apply` is only
-  logged.
+  logged. `sync <change> [--no-pull]` logs its call and prints `rebased: false`, or `true` on the
+  n-th call when the case holds a `sync-rebased-<n>` marker (a rebasing sync also changes the
+  workspace fingerprint, as a moved merge base does, so `review fresh` turns false); it exits 1 on a
+  `sync-conflict` marker, and refuses uncommitted files and a branch without `agkBase` like the real
+  command. `finish <change>` refuses uncommitted files and a change not archived in the committed
+  tree, exits 1 on a `finish-fail` marker (the base moved) and otherwise prints its success JSON.
 - `revdiff` logs its argv to the same file, notes whether `--only` covers every change file and
   whether the description file is the run dir's `revdiff-description.md`, and prints the case's
   `revdiff-<n>.txt` for launch n (nothing = the user quit without annotations).

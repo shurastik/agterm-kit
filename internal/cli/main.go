@@ -28,10 +28,15 @@ Usage:
                                   current round's fingerprint; prints {"fresh":true|false,"round":K}.
                                   A diff review only; an empty scope is not fresh.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
-  agk apply start <change> [--applier H[:M]]
+  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
                                   Start the applier for an OpenSpec change in a <harness>-apply
                                   companion (interactive, autonomous); prints
-                                  {"companion","dir","started"}. Outside agterm it runs headless.
+                                  {"companion","dir","started","worktree","pulled"}. Outside agterm
+                                  it runs headless. With [applier] worktree = true (or --worktree)
+                                  it first pulls the base branch (--ff-only; --no-pull skips it),
+                                  commits the change's artifacts there and runs the applier in the
+                                  new worktree .worktrees/<change> on branch <change>; "worktree"
+                                  is its path (null otherwise), "pulled" whether a pull ran.
   agk apply wait <run-dir> [--timeout SECONDS]
                                   Wait for the current round (default 3600 s); prints
                                   {"status":"done|blocked|needs-human|cancelled|running","round":K,...}.
@@ -39,6 +44,17 @@ Usage:
                                   Start the next round with findings or notes once the applier's
                                   turn is over (default 600 s); prints {"round":K}.
   agk apply close <run-dir>       Close the applier companion (undo restores it).
+  agk sync <change> [--no-pull]   In worktree mode: pull the base branch (--ff-only, skipped with
+                                  --no-pull or without an upstream) and rebase the change's branch
+                                  onto it, in .worktrees/<change>; needs a clean worktree. Prints
+                                  {"change","base","pulled","rebased","head"}. A conflict aborts the
+                                  rebase, leaves the branch as it was and exits 1.
+  agk finish <change>             Merge a finished worktree change and clean up: needs a clean
+                                  worktree, the change archived on its branch and the branch synced
+                                  onto the base. Fast-forwards the base in the main checkout (no
+                                  pull, no rebase), closes the companions of the worktree's runs,
+                                  removes the worktree, deletes the branch; prints
+                                  {"change","base","head","closed"}. A rerun finishes what is left.
   agk config [--applier H[:M]] [--reviewer H[:M]]
                                   Print the resolved worker configuration (harness, model, effort,
                                   extra args, permission mode) and where each value comes from:
@@ -74,6 +90,10 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return e.reviewCmd(ctx, args[1:])
 	case "apply":
 		return e.applyCmd(ctx, args[1:])
+	case "sync":
+		return e.Sync(ctx, args[1:])
+	case "finish":
+		return e.Finish(ctx, args[1:])
 	case "config":
 		return e.Config(ctx, args[1:])
 	case "setup":

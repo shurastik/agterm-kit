@@ -54,6 +54,7 @@ type shownWorker struct {
 	Effort         string            `json:"effort"`
 	ExtraArgs      []string          `json:"extra_args"`
 	PermissionMode *string           `json:"permission_mode,omitempty"`
+	Worktree       *bool             `json:"worktree,omitempty"`
 	Sources        map[string]string `json:"sources"`
 }
 
@@ -65,6 +66,10 @@ func show(w config.Worker, src map[string]string) shownWorker {
 	if _, ok := src["permission_mode"]; ok {
 		pm := w.PermissionMode
 		s.PermissionMode = &pm
+	}
+	if _, ok := src["worktree"]; ok {
+		wt := w.Worktree
+		s.Worktree = &wt
 	}
 	return s
 }

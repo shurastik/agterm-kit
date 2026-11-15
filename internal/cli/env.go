@@ -14,6 +14,7 @@ import (
 	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/review"
 	"github.com/shurastik/agterm-kit/internal/setup"
+	"github.com/shurastik/agterm-kit/internal/worktree"
 )
 
 // Exit codes shared by all commands.
@@ -36,7 +37,9 @@ type Env struct {
 	RepoRoot       func(ctx context.Context, dir string) (string, error)
 	// ApplyState reports an OpenSpec change's apply state (ready, blocked,
 	// all_done) and the CLI's message.
-	ApplyState   func(ctx context.Context, root, change string) (state, message string, err error)
+	ApplyState func(ctx context.Context, root, change string) (state, message string, err error)
+	// Worktree runs the git steps of worktree mode.
+	Worktree     Worktrees
 	NewSessionID func() string
 	Now          func() time.Time
 	Executable   func() (string, error)
@@ -72,6 +75,7 @@ func NewEnv() (*Env, error) {
 		CollectPlan:  review.CollectPlan,
 		RepoRoot:     review.RepoRoot,
 		ApplyState:   apply.OpenSpecState,
+		Worktree:     worktree.Git{},
 		NewSessionID: harness.NewSessionID,
 		Now:          time.Now,
 		Executable:   os.Executable,

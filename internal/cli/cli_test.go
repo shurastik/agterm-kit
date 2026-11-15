@@ -83,6 +83,7 @@ type tenv struct {
 	drivers  map[string]*fakeDriver
 	out, err *bytes.Buffer
 	vars     map[string]string
+	wt       *fakeWorktree
 }
 
 func newHarness(t *testing.T, inAgterm bool) *tenv {
@@ -97,16 +98,18 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 		out:     &bytes.Buffer{},
 		err:     &bytes.Buffer{},
 		vars:    map[string]string{},
+		wt:      newFakeWorktree(""),
 	}
 	if inAgterm {
 		h.vars["AGTERM_ENABLED"] = "1"
 		h.vars["AGTERM_SESSION_ID"] = "SELF"
 	}
 	h.env = &Env{
-		Stdout: h.out,
-		Stderr: h.err,
-		Getenv: func(k string) string { return h.vars[k] },
-		Ctl:    h.ctl,
+		Stdout:   h.out,
+		Stderr:   h.err,
+		Getenv:   func(k string) string { return h.vars[k] },
+		Ctl:      h.ctl,
+		Worktree: h.wt,
 		Driver: func(name string) (harness.Driver, error) {
 			if d, ok := h.drivers[name]; ok {
 				return d, nil

@@ -5,6 +5,8 @@
 # scaffold from evals/_fixtures/outcomes/ (approve when absent). Plan reviews
 # (--change) and diff reviews (--base) are both played; a diff run records the
 # fingerprint of the workspace per round, which `review fresh` compares.
+# `sync` and `finish` play the worktree commands on the workspace repository
+# standing on the change's branch (see scaffold-archive.sh --worktree).
 set -uo pipefail
 # The agent's sandbox cannot run Apple's /usr/bin/git shim (xcrun wants a cache
 # file outside the sandbox); the real binary behind it works.
@@ -16,6 +18,10 @@ if ! "$GIT" --version >/dev/null 2>&1; then
 fi
 git() { "$GIT" "$@"; }
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Run from the main checkout of a worktree case (`agk finish`), the stand-in
+# still logs and plays the outcomes of the workspace that holds the case.
+ws="$(git config --get eval.workspace 2>/dev/null || true)"
+if [ -n "$ws" ] && [ -d "$ws" ]; then root="$ws"; fi
 log="$root/agk-calls.log"
 outcomes="$root/.eval/outcomes/${EVAL_AGK_CASE:-none}"
 companion="EVAL-COMPANION"
@@ -43,6 +49,8 @@ fingerprint() { # base -> hash of the workspace state: git diff <base> plus each
     cd "$root" || exit 1
     git diff --no-color "$1" -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log'
     untracked | while IFS= read -r f; do printf 'untracked %s\n' "$f"; cat "$f"; done
+    # A rebasing `sync` moves the merge base, which the real fingerprint hashes.
+    printf 'rebasing syncs: %s\n' "$(cat "$root/.agk/rebases" 2>/dev/null || echo 0)"
   ) | shasum | awk '{print $1}'
 }
 nothing_to_review() { # base -> true when there is no diff against base and no untracked file
@@ -162,6 +170,52 @@ case "$cmd $sub" in
 "review close")
   dir="$(any_dir "${3:-}")" || exit 1
   note "close: last verdict $(cat "$dir/last-verdict" 2>/dev/null || echo none)"
+  ;;
+"sync "*)
+  shift
+  change=""
+  for a in "$@"; do
+    case "$a" in
+      --no-pull) ;;
+      -*) die "unknown flag $a" ;;
+      *) [ -z "$change" ] || die "usage: agk sync <change> [--no-pull]"; change="$a" ;;
+    esac
+  done
+  [ -n "$change" ] || die "usage: agk sync <change> [--no-pull]"
+  [[ "$change" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "change name \"$change\" is not kebab-case"
+  base="$(git -C "$root" config --get "branch.$change.agkBase" || true)"
+  [ -n "$base" ] || die "branch.$change.agkBase is not set: $change is not a worktree that \`agk apply start\` made"
+  [ "$(git -C "$root" rev-parse --abbrev-ref HEAD)" = "$change" ] || die "the stand-in syncs only from the worktree of branch $change"
+  dirty="$(git -C "$root" status --porcelain | sed 's/^...//' | tr '\n' ' ')"
+  [ -z "$dirty" ] || die "$root has uncommitted files, commit them first: $dirty"
+  [ -f "$outcomes/sync-conflict" ] && die "rebase of $change onto $base conflicts in widget.go; the rebase was aborted and the branch is as it was: resolve it by hand"
+  n="$(grep -c '^agk sync ' "$log")"
+  rebased=false
+  if [ -f "$outcomes/sync-rebased-$n" ]; then
+    rebased=true
+    mkdir -p "$root/.agk"
+    echo $(( $(cat "$root/.agk/rebases" 2>/dev/null || echo 0) + 1 )) > "$root/.agk/rebases"
+  fi
+  note "rebased: $rebased"
+  printf '{"change":"%s","base":"%s","pulled":false,"rebased":%s,"head":"%s"}\n' "$change" "$base" "$rebased" "$(git -C "$root" rev-parse HEAD)"
+  # The case's marker plays a file changing right after the n-th sync.
+  if [ -f "$outcomes/edit-after-sync-$n" ]; then echo "// edited after the sync" >> "$root/widget.go"; fi
+  ;;
+"finish "*)
+  shift
+  [ $# -eq 1 ] && [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "usage: agk finish <change>"
+  change="$1"
+  base="$(git -C "$root" config --get "branch.$change.agkBase" || true)"
+  [ -n "$base" ] || die "branch.$change.agkBase is not set: $change is not a worktree that \`agk apply start\` made"
+  dirty="$(git -C "$root" status --porcelain | sed 's/^...//' | tr '\n' ' ')"
+  [ -z "$dirty" ] || die "$root has uncommitted files, commit them first: $dirty"
+  if git -C "$root" ls-tree --name-only HEAD openspec/changes/ | grep -qx "openspec/changes/$change" \
+     || ! git -C "$root" ls-tree --name-only HEAD openspec/changes/archive/ | grep -qE "^openspec/changes/archive/[0-9]{4}-[0-9]{2}-[0-9]{2}-$change$"; then
+    die "change $change is not archived on branch $change: archive it and commit the archive first"
+  fi
+  [ -f "$outcomes/finish-fail" ] && die "$base has commits that branch $change lacks: run \`agk sync $change\`, check the result again, then finish"
+  note "finish: merged $change into $base"
+  printf '{"change":"%s","base":"%s","head":"%s","closed":[]}\n' "$change" "$base" "$(git -C "$root" rev-parse HEAD)"
   ;;
 "apply close")
   dir="$(any_dir "${3:-}")" || exit 1

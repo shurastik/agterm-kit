@@ -42,14 +42,25 @@ type applyState struct {
 
 var changeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-type applyStart struct {
+// workerStart is what a worker's start prints inside agterm.
+type workerStart struct {
 	Companion *string `json:"companion"`
 	Dir       string  `json:"dir"`
 	Started   bool    `json:"started"`
 }
 
+// applyStart is the stdout of `agk apply start`: the worker's start plus the
+// worktree it runs in.
+type applyStart struct {
+	workerStart
+	// Worktree is the change's worktree the applier runs in, or null.
+	Worktree *string `json:"worktree"`
+	// Pulled says whether a `git pull --ff-only` of the base branch ran.
+	Pulled bool `json:"pulled"`
+}
+
 const applyUsage = `Usage:
-  agk apply start <change> [--applier H[:M]]
+  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
   agk apply wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 3600
   agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]   SECONDS defaults to 600
   agk apply close <run-dir>
@@ -97,41 +108,58 @@ func applierFiles(dir string, w config.Worker) (harness.ApplierFiles, error) {
 // inlineRules reports whether the harness takes the rules in the prompt.
 func inlineRules(w config.Worker) bool { return w.Harness != config.Claude }
 
-// ApplyStart implements `agk apply start <change> [--applier H[:M]]`.
+// ApplyStart implements `agk apply start <change> [--applier H[:M]]
+// [--worktree | --no-worktree] [--no-pull]`.
 func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("agk apply start", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	applier := fs.String("applier", "", "applier HARNESS[:MODEL] for this run")
+	worktreeOn := fs.Bool("worktree", false, "implement in a git worktree of its own (overrides the config)")
+	worktreeOff := fs.Bool("no-worktree", false, "implement in the current checkout (overrides the config)")
+	noPull := fs.Bool("no-pull", false, "worktree mode: do not pull the base branch first")
 	pos, code, ok := parseInterleaved(fs, args)
 	if !ok {
 		return code
 	}
 	if len(pos) != 1 {
-		return e.errorf("usage: agk apply start <change> [--applier H[:M]]")
+		return e.errorf("usage: agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]")
 	}
 	change := pos[0]
 	if !changeName.MatchString(change) {
 		return e.errorf("change name %q is not kebab-case", change)
 	}
+	if *worktreeOn && *worktreeOff {
+		return e.errorf("--worktree and --no-worktree cannot be used together")
+	}
 	root, err := e.RepoRoot(ctx, e.Cwd)
 	if err != nil {
 		return e.errorf("not in a git repository: %v", err)
 	}
-	state, msg, err := e.ApplyState(ctx, root, change)
+	flags := config.Flags{Applier: *applier}
 	switch {
-	case err != nil:
-		return e.errorf("%v", err)
-	case state == "all_done":
-		return e.errorf("nothing to apply: every task of %s is done", change)
-	case state != "ready":
-		return e.errorf("change %s is not ready to apply (%s): %s", change, state, msg)
+	case *worktreeOn:
+		on := true
+		flags.Worktree = &on
+	case *worktreeOff:
+		off := false
+		flags.Worktree = &off
 	}
-	cfg, err := e.resolveConfig(root, config.Flags{Applier: *applier})
+	cfg, err := e.resolveConfig(root, flags)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
 	e.warnSame(cfg)
 	w := cfg.Applier
+	var wt *string
+	pulled := false
+	if w.Worktree {
+		var code int
+		if root, wt, pulled, code, ok = e.worktreeRoot(ctx, change, *noPull); !ok {
+			return code
+		}
+	} else if code, ok := e.checkReady(ctx, root, change); !ok {
+		return code
+	}
 	driver, err := e.Driver(w.Harness)
 	if err != nil {
 		return e.errorf("%v", err)
@@ -168,7 +196,7 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	first := kickoff(filepath.Join(rundir.RoundDir(dir, 1), "prompt.md"))
 	if parent == "" {
 		code := e.headlessRound(ctx, driver, dir, root, 1, st, files, first)
-		if c := e.printJSON(applyStart{Dir: dir, Started: true}); c != ExitOK {
+		if c := e.printJSON(applyStart{workerStart{Dir: dir, Started: true}, wt, pulled}); c != ExitOK {
 			return c
 		}
 		return code
@@ -189,7 +217,7 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if started {
 		markStarted(dir, 1)
 	}
-	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: started})
+	return e.printJSON(applyStart{workerStart{Companion: &id, Dir: dir, Started: started}, wt, pulled})
 }
 
 // headlessRound runs round k of an apply run in the foreground (outside

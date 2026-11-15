@@ -14,11 +14,16 @@ type Worker struct {
 	Effort         string   `json:"effort,omitempty"`
 	ExtraArgs      []string `json:"extra_args,omitempty"`
 	PermissionMode string   `json:"permission_mode,omitempty"`
+	// Worktree is the applier's worktree mode; always false for the reviewer.
+	Worktree bool `json:"worktree"`
 }
 
 // Flags are the raw role flags, HARNESS[:MODEL]; empty when not given.
 type Flags struct {
 	Applier, Reviewer string
+	// Worktree is --worktree (true) or --no-worktree (false) for the applier;
+	// nil when neither was given.
+	Worktree *bool
 }
 
 // Resolved is the configuration of both roles and where each key came from:
@@ -56,6 +61,9 @@ func newState(role string) *state {
 	for _, k := range []string{"harness", "model", "effort", "extra_args"} {
 		s.src[k] = SourceDefault
 	}
+	if role == Applier {
+		s.src["worktree"] = SourceDefault
+	}
 	s.fixPermission()
 	return s
 }
@@ -76,7 +84,7 @@ func (s *state) fixPermission() {
 // setHarness switches harness; options set for another harness are dropped.
 func (s *state) setHarness(h, source string) {
 	if h != s.w.Harness {
-		s.w = Worker{Harness: h}
+		s.w = Worker{Harness: h, Worktree: s.w.Worktree}
 		for _, k := range []string{"model", "effort", "extra_args"} {
 			s.src[k] = SourceDefault
 		}
@@ -98,6 +106,12 @@ func (s *state) apply(l *Layer, source string) error {
 	}
 	if l.ExtraArgs != nil {
 		s.w.ExtraArgs, s.src["extra_args"] = slices.Clone(*l.ExtraArgs), source
+	}
+	if l.Worktree != nil {
+		if s.role != Applier {
+			return fmt.Errorf("%s: %s.worktree: only the applier has a worktree mode", source, s.role)
+		}
+		s.w.Worktree, s.src["worktree"] = *l.Worktree, source
 	}
 	if l.PermissionMode != nil {
 		if s.role != Applier || s.w.Harness != Claude {
@@ -135,6 +149,9 @@ func Resolve(files []*File, flags Flags) (Resolved, error) {
 			if m != "" {
 				s.w.Model, s.src["model"] = m, SourceFlag
 			}
+		}
+		if role == Applier && flags.Worktree != nil {
+			s.w.Worktree, s.src["worktree"] = *flags.Worktree, SourceFlag
 		}
 		out.Sources[role] = s.src
 		if role == Applier {

@@ -3,6 +3,15 @@
 # in the workspace. Options, in any order:
 #   --change         write the change add-widget and commit it
 #   --code           leave an uncommitted code file, widget.go
+#   --worktree       make the workspace a linked worktree of a main repository
+#                    next to it (<workspace>.main, on main with the committed
+#                    change), on branch add-widget with
+#                    branch.add-widget.agkBase = main: what `agk apply start`
+#                    leaves a session in. The stand-in agk logs and works in the
+#                    workspace wherever it runs (git config eval.workspace)
+#   --main-branch    stand on branch add-widget with the base recorded in the
+#                    workspace repository itself, which is a main checkout
+#   --branch         the same without a recorded base
 #   --run KIND:N:CHANGE
 #                    pre-create .agk/KIND/N/ (KIND is applies or reviews) with a
 #                    worker.json recording CHANGE, a companion left open
@@ -18,6 +27,33 @@ while [ $# -gt 0 ]; do
       shift ;;
     --code)
       printf 'package widget\n\n// List prints the project widgets.\nfunc List() {}\n' > widget.go
+      shift ;;
+    --worktree)
+      ws="$PWD"; main="$ws.main"; tmp="$ws.attach"
+      rm -rf "$main" "$tmp"
+      git clone -q "$ws" "$main"
+      git -C "$main" remote remove origin
+      git -C "$main" config user.name eval
+      git -C "$main" config user.email eval@example.invalid
+      git -C "$main" config commit.gpgsign false
+      # attach the workspace: a worktree made next to it lends its .git file
+      g -C "$main" worktree add -q -b add-widget "$tmp" main
+      rm -rf "$ws/.git"
+      mv "$tmp/.git" "$ws/.git"
+      rm -rf "$tmp"
+      g -C "$main" worktree repair "$ws" >/dev/null 2>&1
+      git -C "$main" config branch.add-widget.agkBase main
+      git -C "$main" config eval.workspace "$ws"
+      shift ;;
+    --main-branch|--branch)
+      g checkout -q -b add-widget
+      # the commits the agent makes run with this repository's own config
+      git config user.name eval
+      git config user.email eval@example.invalid
+      git config commit.gpgsign false
+      if [ "$1" = --main-branch ]; then
+        git config branch.add-widget.agkBase main
+      fi
       shift ;;
     --run)
       [ $# -ge 2 ] || { echo "scaffold-archive: --run needs KIND:N:CHANGE" >&2; exit 1; }

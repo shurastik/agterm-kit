@@ -73,3 +73,26 @@ func TestUsageDocumentsChange(t *testing.T) {
 		t.Fatalf("review start -h = %q", h.err)
 	}
 }
+
+// Every usage text documents the worktree flags and the new stdout keys of
+// `apply start`.
+func TestUsageDocumentsWorktreeMode(t *testing.T) {
+	const line = "agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]"
+	for name, text := range map[string]string{"usage": usage, "apply usage": applyUsage} {
+		if !strings.Contains(text, line) {
+			t.Errorf("%s lacks %q", name, line)
+		}
+	}
+	for _, key := range []string{`"worktree"`, `"pulled"`} {
+		if !strings.Contains(usage, key) {
+			t.Errorf("usage lacks the %s stdout key", key)
+		}
+	}
+	h := newHarness(t, true)
+	h.env.Main(context.Background(), []string{"apply", "start", "-h"})
+	for _, f := range []string{"-worktree", "-no-worktree", "-no-pull"} {
+		if !strings.Contains(h.err.String(), f) {
+			t.Errorf("apply start -h lacks %s: %q", f, h.err)
+		}
+	}
+}

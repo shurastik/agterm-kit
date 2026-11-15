@@ -38,6 +38,12 @@ func TestResolveDefaults(t *testing.T) {
 	if r.Sources[Applier]["permission_mode"] != "default" {
 		t.Error("applier permission_mode source")
 	}
+	if r.Applier.Worktree || r.Sources[Applier]["worktree"] != "default" {
+		t.Errorf("applier worktree = %v, source %q", r.Applier.Worktree, r.Sources[Applier]["worktree"])
+	}
+	if _, ok := r.Sources[Reviewer]["worktree"]; ok {
+		t.Error("reviewer has no worktree")
+	}
 	if _, ok := r.Sources[Reviewer]["permission_mode"]; ok {
 		t.Error("reviewer has no permission_mode")
 	}
@@ -124,6 +130,62 @@ func TestResolvePermissionModeOnCodexFromAnotherLayer(t *testing.T) {
 	_, err := Resolve([]*File{user, repo}, Flags{})
 	if err == nil || !strings.Contains(err.Error(), repo.Path) || !strings.Contains(err.Error(), "applier.permission_mode") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveWorktreeFromFile(t *testing.T) {
+	user := load(t, "[applier]\nworktree = true\n")
+	r, err := Resolve([]*File{user}, Flags{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Applier.Worktree || r.Sources[Applier]["worktree"] != user.Path {
+		t.Fatalf("applier = %+v, sources = %v", r.Applier, r.Sources[Applier])
+	}
+	if r.Reviewer.Worktree {
+		t.Fatal("reviewer must not get worktree")
+	}
+}
+
+func TestResolveWorktreeFlag(t *testing.T) {
+	user := load(t, "[applier]\nworktree = true\n")
+	off, on := false, true
+	r, err := Resolve([]*File{user}, Flags{Worktree: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Applier.Worktree || r.Sources[Applier]["worktree"] != SourceFlag {
+		t.Fatalf("--no-worktree: %+v %v", r.Applier, r.Sources[Applier])
+	}
+	r, err = Resolve(nil, Flags{Worktree: &on})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Applier.Worktree || r.Sources[Applier]["worktree"] != SourceFlag {
+		t.Fatalf("--worktree: %+v %v", r.Applier, r.Sources[Applier])
+	}
+}
+
+func TestResolveHarnessSwitchKeepsWorktree(t *testing.T) {
+	user := load(t, "[applier]\nharness = \"claude\"\nworktree = true\nmodel = \"m\"\n")
+	r, err := Resolve([]*File{user}, Flags{Applier: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(r.Applier, Worker{Harness: Codex, Worktree: true}) {
+		t.Fatalf("applier = %+v", r.Applier)
+	}
+	if r.Sources[Applier]["worktree"] != user.Path || r.Sources[Applier]["model"] != "default" {
+		t.Fatalf("sources = %v", r.Sources[Applier])
+	}
+	// a later layer switching the harness keeps it as well
+	repo := load(t, "[applier]\nharness = \"codex\"\n")
+	r, err = Resolve([]*File{user, repo}, Flags{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Applier.Worktree || r.Sources[Applier]["worktree"] != user.Path {
+		t.Fatalf("applier = %+v, sources = %v", r.Applier, r.Sources[Applier])
 	}
 }
 

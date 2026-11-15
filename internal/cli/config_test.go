@@ -29,6 +29,7 @@ type shownRole struct {
 	Effort         string            `json:"effort"`
 	ExtraArgs      []string          `json:"extra_args"`
 	PermissionMode *string           `json:"permission_mode"`
+	Worktree       *bool             `json:"worktree"`
 	Sources        map[string]string `json:"sources"`
 }
 
@@ -56,6 +57,44 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if h.err.Len() != 0 {
 		t.Fatalf("stderr = %q", h.err)
+	}
+}
+
+func TestConfigWorktree(t *testing.T) {
+	h := newHarness(t, false)
+	got := showConfig(t, h)
+	a, r := got["applier"], got["reviewer"]
+	if a.Worktree == nil || *a.Worktree || a.Sources["worktree"] != "default" {
+		t.Fatalf("applier default = %+v", a)
+	}
+	if r.Worktree != nil {
+		t.Fatalf("reviewer must not list worktree: %+v", r)
+	}
+
+	h = newHarness(t, false)
+	root := repoWith(t, h, "[applier]\nworktree = true\n")
+	a = showConfig(t, h)["applier"]
+	if a.Worktree == nil || !*a.Worktree || a.Sources["worktree"] != filepath.Join(root, ".agk.toml") {
+		t.Fatalf("applier from file = %+v", a)
+	}
+
+	// a harness flag keeps the worktree setting and its source
+	h = newHarness(t, false)
+	root = repoWith(t, h, "[applier]\nworktree = true\n")
+	a = showConfig(t, h, "--applier", "codex")["applier"]
+	if a.Harness != "codex" || a.Worktree == nil || !*a.Worktree || a.Sources["worktree"] != filepath.Join(root, ".agk.toml") {
+		t.Fatalf("applier --applier codex = %+v", a)
+	}
+}
+
+func TestConfigWorktreeOnReviewerIsInvalid(t *testing.T) {
+	h := newHarness(t, false)
+	root := repoWith(t, h, "[reviewer]\nworktree = true\n")
+	if code := h.env.Config(context.Background(), nil); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.err.String(), filepath.Join(root, ".agk.toml")) || !strings.Contains(h.err.String(), "reviewer.worktree") || h.out.Len() != 0 {
+		t.Fatalf("stderr %q stdout %q", h.err, h.out)
 	}
 }
 

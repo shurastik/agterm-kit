@@ -25,7 +25,10 @@ The `agk-archive` skill (`/agk-archive`) is the close step: it archives through 
 `openspec-archive-change` only after the last code review approved the code as it is now (this
 session's own `agk review` results plus `agk review fresh`, else a fallback `agk review start
 --base`) and `openspec-verify-change` passed after it with 0 CRITICAL, then closes the change's
-applier and reviewer companions. It never commits or fixes anything.
+applier and reviewer companions. It never fixes anything or pushes, and never commits in the main
+checkout. In a change worktree (branch `<change>` with `branch.<change>.agkBase`, made by `agk apply
+start` in worktree mode) it also commits the code and runs `agk sync` before the gates, syncs again
+before the archive, commits the archive and merges with `agk finish`.
 
 Which harness and model each role uses comes from flags, `.agk.toml` and `~/.config/agk/config.toml`.
 Installed with Homebrew; `agk setup` links the agent skills that teach the main session the loop.
@@ -49,7 +52,10 @@ documented for users in [README.md](README.md); do not duplicate them here. Dev 
 The commands, for an agent driving `agk` (`agk --help` has the flags):
 
 ```bash
-agk apply start <change> [--applier H[:M]]   # applier companion; prints {"companion","dir","started"}
+agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
+                                             # applier companion; prints {"companion","dir","started","worktree","pulled"};
+                                             # worktree mode ([applier] worktree = true): pull the base --ff-only
+                                             # (--no-pull skips), commit the plan, run in .worktrees/<change>
 agk apply wait <dir>                         # {"status":"done|blocked|needs-human|cancelled|running","round":K,...}
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
@@ -66,6 +72,13 @@ agk review fresh <dir>                       # {"fresh":true|false,"round":K}: r
                                              # still match the current round's fingerprint (rounds/<k>/scope.sha256)?
                                              # a plan run, a round without a fingerprint or a bad dir exits 1
 agk review close <dir>
+agk sync <change> [--no-pull]                # worktree mode: pull the base --ff-only (skipped without upstream or
+                                             # --no-pull), rebase branch <change> onto it in .worktrees/<change>;
+                                             # {"change","base","pulled","rebased","head"}; a conflict aborts, exit 1
+agk finish <change>                          # worktree mode: needs a clean, archived, synced worktree; ff-merges the
+                                             # base in the main checkout (no pull, no rebase), closes the worktree's
+                                             # run companions, removes it, deletes the branch;
+                                             # {"change","base","head","closed"}; a rerun completes what is left
 agk config                                   # resolved workers and the source of every value
 agk setup [--skills-dir DIR] [--dry-run]
 agk version
@@ -86,6 +99,7 @@ pass, and stops before `agk apply`) and `skills/agk-archive/SKILL.md` (the close
 | `internal/agterm/` | `Ctl` interface over `agtermctl` (exec + `--json`: companions, status, info, wait, type, text) and a fake for tests |
 | `internal/config/` | Worker configuration: TOML layers, flags, resolution with per-key sources |
 | `internal/harness/` | `Driver` per harness (claude, codex): interactive applier and reviewer argv, headless applier turn, structured inline review turn; reviewer `extra_args` guard; event-stream rendering; `RunStreaming` |
+| `internal/worktree/` | Real-git operations of worktree mode (`Git`): locate the main checkout and `.worktrees/<change>`, pull `--ff-only`, plan commit through a pathspec, `worktree add` with `branch.<change>.agkBase`, status, archived-on-branch, rebase with abort, ff-only merge, remove, `branch -d`; tested on temporary repositories with a bare `origin` |
 | `internal/rundir/` | `.agk/<kind>/<run>/` directories: numbering, rounds, `worker.json` |
 | `internal/apply/` | Applier prompts and rules, round report validation, wait decision, openspec state |
 | `internal/review/` | Review scope from git (with a working-tree fingerprint per diff round), prompts (with the output-file variant) and the fix-up prompt, review JSON parse/validate, wait decision (`Decide`), info lines |

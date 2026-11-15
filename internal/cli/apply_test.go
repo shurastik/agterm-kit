@@ -16,6 +16,7 @@ import (
 	"github.com/shurastik/agterm-kit/internal/config"
 	"github.com/shurastik/agterm-kit/internal/harness"
 	"github.com/shurastik/agterm-kit/internal/rundir"
+	"github.com/shurastik/agterm-kit/internal/worktree"
 )
 
 func runApply(h *tenv, args ...string) int {
@@ -78,7 +79,7 @@ func TestApplyStartClaude(t *testing.T) {
 		agtermtest.Call{Method: "NewCompanion", Args: []string{"SELF", "claude-apply #1", wantCmd, root}},
 		agtermtest.Call{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
 	)
-	if want := `{"companion":"COMP-1","dir":"` + dir + `","started":true}` + "\n"; h.out.String() != want {
+	if want := `{"companion":"COMP-1","dir":"` + dir + `","started":true,"worktree":null,"pulled":false}` + "\n"; h.out.String() != want {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	if id, _ := os.ReadFile(filepath.Join(dir, CompanionFile)); string(id) != "COMP-1\n" {
@@ -204,7 +205,7 @@ func TestApplyInline(t *testing.T) {
 	if f := claude.files[0]; f.Settings != filepath.Join(dir, settingsFile) || f.Rules != filepath.Join(dir, rulesFile) {
 		t.Fatalf("files = %+v", f)
 	}
-	if w := `{"companion":null,"dir":"` + dir + `","started":true}` + "\n"; h.out.String() != w {
+	if w := `{"companion":null,"dir":"` + dir + `","started":true,"worktree":null,"pulled":false}` + "\n"; h.out.String() != w {
 		t.Fatalf("stdout = %q", h.out)
 	}
 	if !strings.Contains(h.err.String(), "claude applying") {
@@ -607,5 +608,344 @@ func TestApplyStartNumbersRunsPerKind(t *testing.T) {
 	}
 	if name := h.ctl.Calls[0].Args[1]; name != "claude-apply #3" {
 		t.Fatalf("name = %q", name)
+	}
+}
+
+// --- worktree mode ---
+
+// wtHarness is a harness whose repo turns worktree mode on, with the fake
+// worktree sitting in the main checkout and every apply-state read recorded in
+// the fake's call list.
+func wtHarness(t *testing.T, inAgterm bool) (*tenv, string) {
+	t.Helper()
+	h := newHarness(t, inAgterm)
+	root := repoWith(t, h, "[applier]\nworktree = true\n")
+	h.wt.loc = worktree.Location{Main: root, Root: root}
+	h.env.ApplyState = func(_ context.Context, r, _ string) (string, string, error) {
+		h.wt.calls = append(h.wt.calls, wtCall{"ApplyState", []string{r}})
+		return "ready", "", nil
+	}
+	if inAgterm {
+		h.ctl.WaitStatus = "active"
+	}
+	return h, root
+}
+
+// only keeps the named operations of the fake's call list, in order.
+func (f *fakeWorktree) only(ops ...string) []string {
+	var out []string
+	for _, c := range f.calls {
+		for _, o := range ops {
+			if c.Op == o {
+				out = append(out, c.Op)
+			}
+		}
+	}
+	return out
+}
+
+func noRunDir(t *testing.T, root string) {
+	t.Helper()
+	for _, d := range []string{root, filepath.Join(root, ".worktrees", "add-auth")} {
+		if exists(filepath.Join(d, ".agk")) {
+			t.Fatalf("a run directory was created under %s", d)
+		}
+	}
+}
+
+func TestApplyStartBothWorktreeFlags(t *testing.T) {
+	h, root := wtHarness(t, true)
+	if code := runApply(h, "start", "add-auth", "--worktree", "--no-worktree"); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.err.String(), "--worktree") || !strings.Contains(h.err.String(), "--no-worktree") {
+		t.Fatalf("stderr = %q", h.err)
+	}
+	if len(h.wt.calls) != 0 || len(h.ctl.Calls) != 0 || h.out.Len() != 0 {
+		t.Fatalf("worktree calls %v, ctl calls %v, stdout %q", h.wt.calls, h.ctl.Calls, h.out)
+	}
+	noRunDir(t, root)
+}
+
+func TestApplyStartModeOffTouchesNoWorktree(t *testing.T) {
+	h := newHarness(t, true)
+	root := repoWith(t, h, "")
+	h.ctl.WaitStatus = "active"
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if len(h.wt.calls) != 0 {
+		t.Fatalf("worktree calls with the mode off: %v", h.wt.calls)
+	}
+	if !strings.Contains(h.out.String(), `"worktree":null,"pulled":false}`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if !exists(applyDir(root)) {
+		t.Fatal("run dir not under the repo root")
+	}
+}
+
+func TestApplyStartNoWorktreeFlagTurnsTheModeOff(t *testing.T) {
+	h, root := wtHarness(t, true)
+	if code := runApply(h, "start", "add-auth", "--no-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if got := h.wt.only("Locate", "Lookup", "PullFFOnly", "CommitPaths", "Add"); len(got) != 0 {
+		t.Fatalf("worktree calls with --no-worktree: %v", h.wt.calls)
+	}
+	if !exists(applyDir(root)) || !strings.Contains(h.out.String(), `"worktree":null`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+}
+
+func TestApplyStartWorktreeFlagTurnsTheModeOn(t *testing.T) {
+	h := newHarness(t, true)
+	root := repoWith(t, h, "")
+	h.wt.loc = worktree.Location{Main: root, Root: root}
+	h.ctl.WaitStatus = "active"
+	if code := runApply(h, "start", "--worktree", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !h.wt.called("Add") {
+		t.Fatalf("--worktree created no worktree: %v", h.wt.calls)
+	}
+}
+
+func TestApplyStartInsideLinkedWorktree(t *testing.T) {
+	for name, tc := range map[string]struct {
+		dir      string // the linked worktree, relative to the main checkout
+		worktree bool   // stdout carries it as "worktree"
+	}{
+		"the change's worktree": {".worktrees/add-auth", true},
+		"another worktree":      {"elsewhere", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, root := wtHarness(t, true)
+			linked := filepath.Join(root, tc.dir)
+			h.wt.loc = worktree.Location{Main: root, Root: linked}
+			if code := runApply(h, "start", "add-auth"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if got := h.wt.only("PullFFOnly", "CommitPaths", "Add", "Upstream", "BranchExists"); len(got) != 0 {
+				t.Fatalf("git steps inside a linked worktree: %v", h.wt.calls)
+			}
+			if !exists(filepath.Join(linked, ".agk", "applies", "20261105-100000")) || exists(filepath.Join(root, ".agk")) {
+				t.Fatal("run dir not under the linked worktree")
+			}
+			if h.ctl.Calls[0].Args[3] != linked {
+				t.Fatalf("companion cwd = %q, want %q", h.ctl.Calls[0].Args[3], linked)
+			}
+			if got := h.wt.only("ApplyState"); len(got) != 1 || h.wt.calls[len(h.wt.calls)-1].Args[0] != linked {
+				t.Fatalf("apply state read: %v", h.wt.calls)
+			}
+			want := `"worktree":null,`
+			if tc.worktree {
+				want = `"worktree":"` + linked + `",`
+			}
+			if !strings.Contains(h.out.String(), want) || !strings.Contains(h.out.String(), `"pulled":false`) {
+				t.Fatalf("stdout = %q, want %q", h.out, want)
+			}
+		})
+	}
+}
+
+func TestApplyStartNewWorktree(t *testing.T) {
+	h, root := wtHarness(t, true)
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	wt := filepath.Join(root, ".worktrees", "add-auth")
+	if got, want := h.wt.only("Lookup", "ApplyState", "PullFFOnly", "CommitPaths", "Add"),
+		[]string{"Lookup", "ApplyState", "PullFFOnly", "ApplyState", "CommitPaths", "Add"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("call order = %v, want %v", got, want)
+	}
+	for _, c := range h.wt.calls {
+		switch c.Op {
+		case "ApplyState":
+			if c.Args[0] != root {
+				t.Fatalf("apply state read in %q, want the main checkout", c.Args[0])
+			}
+		case "PullFFOnly":
+			if c.Args[0] != root {
+				t.Fatalf("pull in %q", c.Args[0])
+			}
+		case "CommitPaths":
+			if want := []string{root, "docs(openspec): plan add-auth", "openspec/changes/add-auth"}; !reflect.DeepEqual(c.Args, want) {
+				t.Fatalf("CommitPaths(%v), want %v", c.Args, want)
+			}
+		case "Add":
+			if want := []string{root, "add-auth", "main"}; !reflect.DeepEqual(c.Args, want) {
+				t.Fatalf("Add(%v), want %v", c.Args, want)
+			}
+		}
+	}
+	dir := filepath.Join(wt, ".agk", "applies", "20261105-100000")
+	if !exists(dir) || exists(filepath.Join(root, ".agk")) {
+		t.Fatalf("run dir not under the worktree %s", wt)
+	}
+	if cwd := h.ctl.Calls[0].Args[3]; cwd != wt {
+		t.Fatalf("companion cwd = %q, want %q", cwd, wt)
+	}
+	if want := `{"companion":"COMP-1","dir":"` + dir + `","started":true,"worktree":"` + wt + `","pulled":true}` + "\n"; h.out.String() != want {
+		t.Fatalf("stdout = %q, want %q", h.out, want)
+	}
+}
+
+func TestApplyStartNewWorktreeInline(t *testing.T) {
+	h, root := wtHarness(t, false)
+	claude := h.drivers["claude"]
+	claude.onHeadless = func(tr harness.Turn) {
+		os.WriteFile(filepath.Join(tr.Dir, apply.ReportFile), []byte(doneReport), 0o644)
+	}
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	wt := filepath.Join(root, ".worktrees", "add-auth")
+	if len(claude.headless) != 1 || claude.headless[0].Root != wt {
+		t.Fatalf("headless = %+v, want root %s", claude.headless, wt)
+	}
+	if !strings.Contains(h.out.String(), `"companion":null,`) || !strings.Contains(h.out.String(), `"worktree":"`+wt+`","pulled":true`) {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if len(h.ctl.Calls) != 0 {
+		t.Fatalf("agterm calls outside agterm: %v", h.ctl.Calls)
+	}
+}
+
+func TestApplyStartSecondStateCheckRefuses(t *testing.T) {
+	h, root := wtHarness(t, true)
+	n := 0
+	h.env.ApplyState = func(_ context.Context, r, _ string) (string, string, error) {
+		h.wt.calls = append(h.wt.calls, wtCall{"ApplyState", []string{r}})
+		if n++; n == 2 {
+			return "all_done", "", nil
+		}
+		return "ready", "", nil
+	}
+	if code := runApply(h, "start", "add-auth"); code != 1 || !strings.Contains(h.err.String(), "nothing to apply") {
+		t.Fatalf("exit %d, %q", code, h.err)
+	}
+	if got := h.wt.only("PullFFOnly", "ApplyState", "CommitPaths", "Add"); !reflect.DeepEqual(got, []string{"ApplyState", "PullFFOnly", "ApplyState"}) {
+		t.Fatalf("calls = %v", h.wt.calls)
+	}
+	noRunDir(t, root)
+	if len(h.ctl.Calls) != 0 {
+		t.Fatalf("companion started: %v", h.ctl.Calls)
+	}
+}
+
+func TestApplyStartSkipsThePull(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		prep func(h *tenv)
+	}{
+		"--no-pull":   {[]string{"--no-pull"}, nil},
+		"no upstream": {nil, func(h *tenv) { h.wt.hasUpstream = false }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := wtHarness(t, true)
+			if tc.prep != nil {
+				tc.prep(h)
+			}
+			if code := runApply(h, append([]string{"start", "add-auth"}, tc.args...)...); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if got := h.wt.only("PullFFOnly", "ApplyState", "CommitPaths", "Add"); !reflect.DeepEqual(got, []string{"ApplyState", "CommitPaths", "Add"}) {
+				t.Fatalf("calls = %v", h.wt.calls)
+			}
+			if !strings.Contains(h.out.String(), `"pulled":false`) {
+				t.Fatalf("stdout = %q", h.out)
+			}
+		})
+	}
+}
+
+func TestApplyStartWorktreeRefusals(t *testing.T) {
+	cases := map[string]struct {
+		prep func(h *tenv, root string)
+		want string
+	}{
+		"detached HEAD":           {func(h *tenv, root string) { h.wt.errs["CurrentBranch"] = worktree.ErrDetached }, "base branch"},
+		"branch without worktree": {func(h *tenv, root string) { h.wt.branchOK = true }, "branch add-auth"},
+		"plain directory": {func(h *tenv, root string) {
+			h.wt.entry = worktree.Entry{Kind: worktree.PlainDir}
+		}, filepath.Join(".worktrees", "add-auth")},
+		"worktree of another branch": {func(h *tenv, root string) {
+			h.wt.entry = worktree.Entry{Kind: worktree.OtherBranch, Branch: "other"}
+		}, "other"},
+		"change not ready": {func(h *tenv, root string) {
+			h.env.ApplyState = func(context.Context, string, string) (string, string, error) {
+				return "blocked", "missing artifacts: specs", nil
+			}
+		}, "missing artifacts: specs"},
+		"pull fails": {func(h *tenv, root string) {
+			h.wt.errs["PullFFOnly"] = errors.New("fatal: Not possible to fast-forward, aborting.")
+		}, "Not possible to fast-forward"},
+		"commit fails": {func(h *tenv, root string) {
+			h.wt.errs["CommitPaths"] = errors.New("pre-commit hook: lint failed")
+		}, "lint failed"},
+		"worktree add fails": {func(h *tenv, root string) {
+			h.wt.errs["Add"] = errors.New("fatal: invalid reference: main")
+		}, "invalid reference"},
+		"locate fails": {func(h *tenv, root string) { h.wt.errs["Locate"] = errors.New("git exploded") }, "git exploded"},
+	}
+	// what must not have happened by the time each case stops
+	forbidden := map[string][]string{
+		"detached HEAD":              {"PullFFOnly", "CommitPaths", "Add"},
+		"branch without worktree":    {"PullFFOnly", "CommitPaths", "Add"},
+		"plain directory":            {"PullFFOnly", "CommitPaths", "Add"},
+		"worktree of another branch": {"PullFFOnly", "CommitPaths", "Add"},
+		"change not ready":           {"PullFFOnly", "CommitPaths", "Add"},
+		"pull fails":                 {"CommitPaths", "Add"},
+		"commit fails":               {"Add"},
+		"worktree add fails":         {},
+		"locate fails":               {"PullFFOnly", "CommitPaths", "Add"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h, root := wtHarness(t, true)
+			c.prep(h, root)
+			if code := runApply(h, "start", "add-auth"); code != 1 {
+				t.Fatalf("exit %d", code)
+			}
+			if !strings.Contains(h.err.String(), c.want) || h.out.Len() != 0 {
+				t.Fatalf("stderr %q stdout %q, want it to mention %q", h.err, h.out, c.want)
+			}
+			if got := h.wt.only(forbidden[name]...); len(got) != 0 {
+				t.Fatalf("%v ran before the refusal: %v", got, h.wt.calls)
+			}
+			noRunDir(t, root)
+			if len(h.ctl.Calls) != 0 {
+				t.Fatalf("companion started: %v", h.ctl.Calls)
+			}
+		})
+	}
+}
+
+func TestApplyStartReusesTheChangeWorktree(t *testing.T) {
+	h, root := wtHarness(t, true)
+	wt := filepath.Join(root, ".worktrees", "add-auth")
+	h.wt.entry = worktree.Entry{Path: wt, Kind: worktree.IsWorktree, Branch: "add-auth"}
+	if code := runApply(h, "start", "add-auth"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if got := h.wt.only("PullFFOnly", "CommitPaths", "Add", "Upstream"); len(got) != 0 {
+		t.Fatalf("git steps on reuse: %v", h.wt.calls)
+	}
+	var states []string
+	for _, c := range h.wt.calls {
+		if c.Op == "ApplyState" {
+			states = append(states, c.Args[0])
+		}
+	}
+	if !reflect.DeepEqual(states, []string{wt}) {
+		t.Fatalf("apply state read in %v, want the worktree", states)
+	}
+	dir := filepath.Join(wt, ".agk", "applies", "20261105-100000")
+	if !exists(dir) || exists(filepath.Join(root, ".agk")) {
+		t.Fatal("new run dir not under the existing worktree")
+	}
+	if want := `{"companion":"COMP-1","dir":"` + dir + `","started":true,"worktree":"` + wt + `","pulled":false}` + "\n"; h.out.String() != want {
+		t.Fatalf("stdout = %q", h.out)
 	}
 }

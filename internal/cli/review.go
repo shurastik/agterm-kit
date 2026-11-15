@@ -226,7 +226,7 @@ var forwardedEnv = []string{"PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "AGTERMCT
 const CompanionFile = "companion"
 
 // startResult is what an inline `review start` prints; inside agterm it is
-// applyStart (with started).
+// workerStart (with started).
 type startResult struct {
 	Companion *string `json:"companion"`
 	Dir       string  `json:"dir"`
@@ -395,7 +395,7 @@ func (e *Env) startInteractive(ctx context.Context, parent, root, dir, fingerpri
 		markStarted(dir, 1)
 	}
 	reporter{env: e, target: id}.set(ctx, "active", review.ReviewingLine(review.Label{Harness: w.Harness, Num: num, Round: 1}))
-	return e.printJSON(applyStart{Companion: &id, Dir: dir, Started: started})
+	return e.printJSON(workerStart{Companion: &id, Dir: dir, Started: started})
 }
 
 // reviewOutput is the output contract of an interactive round: the reviewer

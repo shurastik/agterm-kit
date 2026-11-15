@@ -209,7 +209,7 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	id, err := e.startCompanion(ctx, parent, fmt.Sprintf("%s-apply #%d", w.Harness, num), cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, companionName(change, w.Harness, "apply", num), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}

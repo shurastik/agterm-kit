@@ -76,9 +76,14 @@ func TestApplyStartClaude(t *testing.T) {
 	kickoff := "Read " + prompt + " and follow it."
 	wantCmd := "'claude' '--model=' '--session=SESS-NEW' '" + kickoff + "'"
 	assertCalls(t, h.ctl,
-		agtermtest.Call{Method: "NewCompanion", Args: []string{"SELF", "claude-apply #1", wantCmd, root}},
+		agtermtest.Call{Method: "NewCompanion", Args: []string{"SELF", "add-auth · claude-apply #1", wantCmd, root}},
 		agtermtest.Call{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
 	)
+	for _, m := range h.ctl.Methods() {
+		if strings.Contains(strings.ToLower(m), "rename") {
+			t.Fatalf("agk must not rename a session, got %s", m)
+		}
+	}
 	if want := `{"companion":"COMP-1","dir":"` + dir + `","started":true,"worktree":null,"pulled":false}` + "\n"; h.out.String() != want {
 		t.Fatalf("stdout = %q", h.out)
 	}
@@ -95,7 +100,7 @@ func TestApplyStartCodex(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	dir := applyDir(root)
-	if name := h.ctl.Calls[0].Args[1]; name != "codex-apply #1" {
+	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · codex-apply #1" {
 		t.Fatalf("name = %q", name)
 	}
 	if s := readApplyState(t, dir); s.Session != "" || s.Worker.Model != "gpt-5.5" || s.Worker.PermissionMode != "" {
@@ -606,7 +611,7 @@ func TestApplyStartNumbersRunsPerKind(t *testing.T) {
 	if code := runApply(h, "start", "add-auth"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if name := h.ctl.Calls[0].Args[1]; name != "claude-apply #3" {
+	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · claude-apply #3" {
 		t.Fatalf("name = %q", name)
 	}
 }

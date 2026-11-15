@@ -11,7 +11,7 @@ description: >
 
 # agk apply
 
-The applier is a live agent session in a `<harness>-apply #N` companion under this session. It
+The applier is a live agent session in a `<change> · <harness>-apply #N` companion under this session. It
 implements the change test first, runs the project's gates, checks off tasks and ends every round
 with a report file. It never commits, pushes or archives. You drive it; the user can watch and step
 in.

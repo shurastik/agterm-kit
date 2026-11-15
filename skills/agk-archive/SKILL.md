@@ -115,12 +115,13 @@ code is still what that round saw.
 3. No such run, or the gate is unconfirmed: run the review yourself (the fallback). From the repo
    root (the worktree root in a change worktree):
    ```bash
-   agk review start --base <base>    # see below for <base>
+   agk review start --base <base> --for <change>   # see below for <base>
    agk review wait <dir>             # in the background (run_in_background: true), never poll
    ```
    `<base>` is the recorded base from step 2 in a change worktree. Elsewhere it is the branch the
-   work forked from; main when in doubt. Branch on the wait `status` as the `agk-review` skill
-   says. Remember `<dir>` for step 7. Then:
+   work forked from; main when in doubt. `--for <change>` only names the reviewer's companion
+   after the change; always pass it, it does not change the review. Branch on the wait `status` as
+   the `agk-review` skill says. Remember `<dir>` for step 7. Then:
    - `nothing to review` (exit 1 of `start`, for example everything is already committed into
      `main`): ask the user whether to archive without a code review, or which base to review
      against (for example the commit before the implementation). Archive nothing until they answer;
@@ -154,7 +155,7 @@ have moved during the gates:
 
 - `"rebased": false`: the gates saw exactly the tree that will be merged. Continue.
 - `"rebased": true`: the code the gates saw is no longer the merged tree. Go back to step 4 and run
-  both gates again (a new `agk review start --base <base>` when `agk review fresh` is not fresh,
+  both gates again (a new `agk review start --base <base> --for <change>` when `agk review fresh` is not fresh,
   and verify again), then this sync again. Archive only after a sync that did not rebase.
 - exit 1: report its message and stop, as in step 3.
 

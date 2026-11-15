@@ -12,8 +12,9 @@ description: >
 
 # agk review
 
-`agk` runs the reviewer read-only on the diff, shows it in a `<harness>-review #N` companion under
-this session, and hands back structured findings, one round at a time. Inside agterm the companion
+`agk` runs the reviewer read-only on the diff, shows it in a `<change> · <harness>-review #N`
+companion (`<harness>-review #N` when no change is named) under this session, and hands back
+structured findings, one round at a time. Inside agterm the companion
 is the harness's own interactive session: the user can read its reasoning and answer its questions
 there. The reviewer writes its findings to a file, and `agk review wait` validates them. The
 companion stays open between rounds; you close it when the loop is over.
@@ -22,8 +23,11 @@ companion stays open between rounds; you close it when the loop is over.
 
 1. **Start** from the repo (or worktree) root:
    ```bash
-   agk review start --base <base>    # base defaults to main; use the branch the work forked from
+   agk review start --base <base> [--for <change>]   # base defaults to main; use the branch the work forked from
    ```
+   Pass `--for <change>` when the diff is the implementation of an OpenSpec change you know: it
+   only names the companion `<change> · <harness>-review #N`, the review itself is the same. Leave
+   it out otherwise; the companion is then `<harness>-review #N`.
    - stdout: `{"companion":"<id>","dir":"<run dir>","started":true}`. Keep `dir` for every later
      step. `"started":false` means the reviewer did not report in 60 s (usually a folder-trust or
      login prompt in its companion): stderr shows the last screen lines. Tell the user to answer it
@@ -109,8 +113,11 @@ To review the planning artifacts of an OpenSpec change instead of a code diff (t
 skill does this after writing a change):
 
 ```bash
-agk review start --change <change>   # not together with --base
+agk review start --change <change>   # not together with --base or --for
 ```
+
+Its companion is named `<change> · <harness>-plan #N`, so it does not look like a code review of
+the same change.
 
 The scope is every file of `openspec/changes/<change>/` plus the current main spec of each
 capability the change has a delta for, read from disk whatever their git state. `nothing to review`

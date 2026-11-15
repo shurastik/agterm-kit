@@ -153,7 +153,7 @@ The commands print JSON; keep the `dir` they return.
 agk apply start add-json-export          # {"companion":"<id>","dir":"<run dir>","started":true,"worktree":null,"pulled":false}
 agk apply wait <run dir>                 # {"status":"done|blocked|needs-human|cancelled|running","round":1,...}
 
-agk review start --base main             # {"companion":"<id>","dir":"<run dir>","started":true}
+agk review start --base main --for add-json-export   # {"companion":"<id>","dir":"<run dir>","started":true}
 agk review wait <run dir>                # {"status":"completed|blocked|needs-human|cancelled|running","round":1,...}
 ```
 
@@ -180,6 +180,15 @@ Before giving up, agk types one Enter of its own when the line is visible on the
 worker is idle. Outside agterm the output has no `started` field.
 
 `agk review start --change add-json-export` reviews the plan of a change instead of a diff.
+`--for <change>` only names the change a diff review implements (kebab-case, not together with
+`--change`): the review is the same, and the run records the name.
+
+The sidebar names of the companions carry the change, so several changes in flight stay apart:
+`<change> · <harness>-apply #N` for the applier, `<change> · <harness>-plan #N` for a plan review
+(`--change`), `<change> · <harness>-review #N` for a diff review started with `--for`, and
+`<harness>-review #N` for one without. agk names only the companions it creates; your own session
+keeps its name.
+
 `agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K}`, whether
 the current diff still matches what the run's current round reviewed (committing does not change
 it, an edit does; a plan review or a round from an older agk exits 1). When the loop is over:

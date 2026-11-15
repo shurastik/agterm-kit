@@ -61,18 +61,24 @@ cmd="${1:-}"; sub="${2:-}"
 case "$cmd $sub" in
 "review start")
   shift 2
-  change=""; base=""; given_change=0
+  change=""; base=""; given_change=0; for_change=""; given_for=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --change) need --change $#; change="${2:-}"; given_change=1; shift 2 ;;
       --change=*) change="${1#--change=}"; given_change=1; shift ;;
       --base) need --base $#; base="${2:-}"; shift 2 ;;
       --base=*) base="${1#--base=}"; shift ;;
+      --for) need --for $#; for_change="${2:-}"; given_for=1; shift 2 ;;
+      --for=*) for_change="${1#--for=}"; given_for=1; shift ;;
       --reviewer) need --reviewer $#; shift 2 ;;
       *) shift ;;
     esac
   done
   if [ "$given_change" = 1 ] && [ -n "$base" ]; then die "--change and --base exclude each other"; fi
+  if [ "$given_for" = 1 ]; then
+    [ "$given_change" = 0 ] || die "--for and --change exclude each other"
+    [[ "$for_change" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "invalid change name \"$for_change\": want kebab-case, like add-dark-mode"
+  fi
   if [ "$given_change" = 0 ]; then # a diff review
     base="${base:-main}"
     git -C "$root" rev-parse --verify --quiet "$base^{commit}" >/dev/null || die "merge base of \"$base\" and HEAD: unknown ref"
@@ -81,7 +87,11 @@ case "$cmd $sub" in
     dir="$root/.agk/reviews/$n"
     mkdir -p "$dir/rounds/1"
     echo 1 > "$dir/round"; echo "$base" > "$dir/base"
-    printf '{"worker":{"harness":"codex"},"base":"%s","interactive":true}\n' "$base" > "$dir/worker.json"
+    if [ "$given_for" = 1 ]; then
+      printf '{"worker":{"harness":"codex"},"base":"%s","for":"%s","interactive":true}\n' "$base" "$for_change" > "$dir/worker.json"
+    else
+      printf '{"worker":{"harness":"codex"},"base":"%s","interactive":true}\n' "$base" > "$dir/worker.json"
+    fi
     fingerprint "$base" > "$dir/rounds/1/fingerprint"
     printf '{"companion":"%s","dir":"%s","started":true}\n' "$companion" "$dir"
     exit 0

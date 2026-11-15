@@ -130,6 +130,19 @@ d1="$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdi
 printf '%s' "$out" | grep -q '"started":true' || fail "start --base output: $out"
 if a agk review start --base main --change add-widget 2>/dev/null; then fail "--base with --change accepted"; fi
 if a agk review start --base no-such-ref 2>/dev/null; then fail "unknown base accepted"; fi
+# --for records the change a diff review implements, in either spelling.
+for fa in "--for add-widget" "--for=add-widget" "--base main --for add-widget"; do
+  fo="$(a agk review start $fa)" || fail "review start $fa"
+  fd="$(printf '%s' "$fo" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+  grep -q '"for":"add-widget"' "$fd/worker.json" || fail "start $fa: worker.json lacks for: $(cat "$fd/worker.json")"
+  grep -q '"change"' "$fd/worker.json" && fail "start $fa: a diff review must record no change"
+  [ "$(cat "$fd/base")" = main ] || fail "start $fa: base is not main"
+done
+if a agk review start --for ../secrets 2>/dev/null; then fail "--for ../secrets accepted"; fi
+if a agk review start --for "" 2>/dev/null; then fail "empty --for accepted"; fi
+if a agk review start --for= 2>/dev/null; then fail "empty --for= accepted"; fi
+if a agk review start --for Add_X 2>/dev/null; then fail "non-kebab --for accepted"; fi
+if a agk review start --change add-widget --for add-widget 2>/dev/null; then fail "--for with --change accepted"; fi
 
 # wait plays the approve; fresh follows the workspace.
 w="$(a agk review wait "$d1")"

@@ -8,10 +8,12 @@ import (
 const usage = `agk - agterm workflow kit
 
 Usage:
-  agk review start [--base REF | --change NAME] [--reviewer H[:M]]
+  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]
                                   Review changes since the merge base of REF (default main) in a
                                   <harness>-review companion, an interactive reviewer session you can
                                   talk to; prints {"companion","dir","started"}.
+                                  --for names the OpenSpec change NAME the diff implements: the
+                                  companion becomes "NAME · <harness>-review #N"; the review is the same.
                                   --change reviews the planning artifacts of OpenSpec change NAME
                                   (and the main specs its deltas touch) instead of a diff.
                                   Outside agterm the review runs inline (companion null).
@@ -69,7 +71,7 @@ Exit codes: 0 ok, 1 error (2 and 3 are reserved).
 `
 
 const reviewUsage = `Usage:
-  agk review start [--base REF | --change NAME] [--reviewer H[:M]]   REF defaults to main
+  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]   REF defaults to main
   agk review wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 1800
   agk review send <run-dir> [--note FILE] [--timeout SECONDS]   SECONDS defaults to 600
   agk review fresh <run-dir>

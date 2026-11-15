@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -425,7 +426,7 @@ func TestReviewStartChangeSpawnsCompanion(t *testing.T) {
 	if s := readState(t, dir); s.Change != "add-x" || s.Base != "" || s.Worker.Harness != "codex" {
 		t.Fatalf("worker.json = %+v", s)
 	}
-	if h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "codex-review #1" {
+	if h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "add-x · codex-plan #1" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
 	if !strings.Contains(h.out.String(), `"companion":"COMP-1"`) || !strings.Contains(h.out.String(), `"started":true`) {
@@ -762,5 +763,172 @@ func TestReviewStartPlanRoundHasNoScopeFingerprint(t *testing.T) {
 	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
 	if exists(scopeFilePath(dir, 1)) {
 		t.Fatal("a plan round must not record a scope fingerprint")
+	}
+}
+
+func TestReviewStartPlanCompanionNameClaude(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptPlan(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x", "--reviewer", "claude"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-x · claude-plan #1" {
+		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
+	for _, m := range h.ctl.Methods() {
+		if strings.Contains(strings.ToLower(m), "rename") {
+			t.Fatalf("agk must not rename a session, got %s", m)
+		}
+	}
+}
+
+func TestReviewStartForNamesDiffCompanion(t *testing.T) {
+	for name, args := range map[string][]string{
+		"with base": {"--base", "main", "--for", "add-auth"},
+		"alone":     {"--for", "add-auth"},
+		"equals":    {"--for=add-auth"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			root, _ := filepath.EvalSymlinks(t.TempDir())
+			seen := scriptScope(h, root)
+			if code := h.env.ReviewStart(context.Background(), args); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if !reflect.DeepEqual(*seen, []string{h.env.Cwd, "main"}) {
+				t.Fatalf("collect args = %q", *seen)
+			}
+			if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-auth · codex-review #1" {
+				t.Fatalf("calls = %v", h.ctl.Calls)
+			}
+			dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+			if s := readState(t, dir); s.For != "add-auth" || s.Base != "main" || s.Change != "" {
+				t.Fatalf("worker.json = %+v", s)
+			}
+			var raw map[string]any
+			b, _ := os.ReadFile(filepath.Join(dir, "worker.json"))
+			if err := json.Unmarshal(b, &raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, has := raw["change"]; has || raw["for"] != "add-auth" {
+				t.Fatalf("worker.json = %s", b)
+			}
+		})
+	}
+}
+
+func TestReviewStartForRefusals(t *testing.T) {
+	cases := map[string]struct {
+		args []string
+		want string
+	}{
+		"path-like": {[]string{"--for", "../secrets"}, `invalid change name "../secrets"`},
+		"empty":     {[]string{"--for", ""}, `invalid change name ""`},
+		"empty eq":  {[]string{"--for="}, `invalid change name ""`},
+		"with plan": {[]string{"--change", "add-auth", "--for", "add-auth"}, "exclude each other"},
+		"plan last": {[]string{"--for", "add-auth", "--change", "add-auth"}, "exclude each other"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			root, _ := filepath.EvalSymlinks(t.TempDir())
+			h.env.Cwd = root
+			collected := false
+			h.env.Collect = func(context.Context, string, string) (review.Scope, error) {
+				collected = true
+				return review.Scope{Root: root, Base: "main", MergeBase: "mb", Diff: "+x\n"}, nil
+			}
+			h.env.CollectPlan = func(context.Context, string, string) (review.PlanScope, error) {
+				collected = true
+				return samplePlanScope(root), nil
+			}
+			if code := h.env.ReviewStart(context.Background(), c.args); code != 1 {
+				t.Fatalf("exit %d, want 1 (stderr %q)", code, h.err)
+			}
+			if !strings.Contains(h.err.String(), c.want) || h.out.Len() != 0 {
+				t.Fatalf("stderr %q stdout %q", h.err, h.out)
+			}
+			if collected || exists(filepath.Join(root, ".agk")) || len(h.ctl.Calls) != 0 {
+				t.Fatalf("nothing may be collected or started: calls %v", h.ctl.Calls)
+			}
+		})
+	}
+}
+
+// --for only labels a run: the scope fingerprint is the same and the prompt
+// differs only in the paths of the run's own schema and output file.
+func TestReviewStartForDoesNotChangeScopeOrPrompt(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	if code := h.env.ReviewStart(context.Background(), []string{"--base", "main"}); code != 0 {
+		t.Fatalf("plain: exit %d: %s", code, h.err)
+	}
+	if code := h.env.ReviewStart(context.Background(), []string{"--base", "main", "--for", "add-auth"}); code != 0 {
+		t.Fatalf("for: exit %d: %s", code, h.err)
+	}
+	plain := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	forDir := filepath.Join(root, ".agk", "reviews", "20261105-100000-2")
+	if s := readState(t, forDir); s.For != "add-auth" {
+		t.Fatalf("second run is not the --for run: %+v", s)
+	}
+	a, _ := os.ReadFile(scopeFilePath(plain, 1))
+	b, _ := os.ReadFile(scopeFilePath(forDir, 1))
+	if len(a) == 0 || !bytes.Equal(a, b) {
+		t.Fatalf("scope.sha256 differs: %q vs %q", a, b)
+	}
+	norm := func(dir string) string {
+		p, err := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		own := []string{filepath.Join(dir, "schema.json"), filepath.Join(dir, "out", "1.json")}
+		for _, o := range own {
+			if !strings.Contains(string(p), o) {
+				t.Fatalf("prompt of %s does not name its own %s", dir, o)
+			}
+		}
+		out := strings.ReplaceAll(string(p), own[0], "<schema>")
+		return strings.ReplaceAll(out, own[1], "<out>")
+	}
+	if norm(plain) != norm(forDir) {
+		t.Fatalf("prompts differ beyond run paths:\n%s\n---\n%s", norm(plain), norm(forDir))
+	}
+}
+
+func TestReviewStartForInline(t *testing.T) {
+	h := newHarness(t, false)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	h.drivers["codex"].outputs = []string{threeFindings}
+	if code := h.env.ReviewStart(context.Background(), []string{"--for", "add-auth"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")
+	if s := readState(t, dir); s.For != "add-auth" || s.Base != "main" || s.Change != "" {
+		t.Fatalf("worker.json = %+v", s)
+	}
+	if len(h.ctl.Calls) != 0 {
+		t.Fatalf("no agterm calls expected: %v", h.ctl.Calls)
+	}
+}
+
+// Two inline runs carry no output paths: with and without --for the prompts
+// are byte for byte the same.
+func TestReviewStartForInlinePromptsIdentical(t *testing.T) {
+	h := newHarness(t, false)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	h.drivers["codex"].outputs = []string{threeFindings, threeFindings}
+	for _, args := range [][]string{nil, {"--for", "add-auth"}} {
+		if code := h.env.ReviewStart(context.Background(), args); code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, h.err)
+		}
+	}
+	a, _ := os.ReadFile(filepath.Join(root, ".agk", "reviews", "20261105-100000", "rounds", "1", "prompt.md"))
+	b, _ := os.ReadFile(filepath.Join(root, ".agk", "reviews", "20261105-100000-2", "rounds", "1", "prompt.md"))
+	if len(a) == 0 || !bytes.Equal(a, b) {
+		t.Fatalf("inline prompts differ:\n%s\n---\n%s", a, b)
 	}
 }

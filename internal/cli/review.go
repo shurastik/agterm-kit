@@ -74,11 +74,14 @@ const (
 )
 
 // reviewState is worker.json: the configuration a review is pinned to.
-// A diff review records its base, a plan review its change.
+// A diff review records its base, a plan review its change. For is the change
+// a diff review implements; it only labels the run, so Change (the plan-review
+// test) stays empty.
 type reviewState struct {
 	Worker  config.Worker `json:"worker"`
 	Base    string        `json:"base,omitempty"`
 	Change  string        `json:"change,omitempty"`
+	For     string        `json:"for,omitempty"`
 	Session string        `json:"session,omitempty"`
 	// Interactive marks a reviewer that runs as a harness TUI in its
 	// companion. A companion without it was started by an older agk.
@@ -258,12 +261,13 @@ func (e *Env) envCommand(argv ...string) (string, error) {
 	return strings.Join(parts, " "), nil
 }
 
-// ReviewStart implements `agk review start [--base REF | --change NAME] [--reviewer H[:M]]`.
+// ReviewStart implements `agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]`.
 func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("agk review start", flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
 	base := fs.String("base", "main", "review changes since the merge base of this ref and HEAD")
 	change := fs.String("change", "", "review the planning artifacts of this OpenSpec change instead of a diff (excludes --base)")
+	forChange := fs.String("for", "", "name the OpenSpec change this diff review implements, for the companion's name (excludes --change)")
 	reviewer := fs.String("reviewer", "", "reviewer HARNESS[:MODEL] for this run")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -279,6 +283,15 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	// not fall back to a diff review.
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["for"] {
+		if given["change"] {
+			return e.errorf("--for and --change exclude each other")
+		}
+		if !changeName.MatchString(*forChange) {
+			return e.errorf("invalid change name %q: want kebab-case, like add-dark-mode", *forChange)
+		}
+		state.For = *forChange
+	}
 	if given["change"] {
 		if given["base"] {
 			return e.errorf("--change and --base exclude each other")
@@ -386,7 +399,7 @@ func (e *Env) startInteractive(ctx context.Context, parent, root, dir, fingerpri
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	id, err := e.startCompanion(ctx, parent, fmt.Sprintf("%s-review #%d", w.Harness, num), cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, reviewCompanionName(state, num), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -396,6 +409,15 @@ func (e *Env) startInteractive(ctx context.Context, parent, root, dir, fingerpri
 	}
 	reporter{env: e, target: id}.set(ctx, "active", review.ReviewingLine(review.Label{Harness: w.Harness, Num: num, Round: 1}))
 	return e.printJSON(workerStart{Companion: &id, Dir: dir, Started: started})
+}
+
+// reviewCompanionName names the companion of a review: a plan review carries
+// its change as "-plan", a diff review the change it was started --for, if any.
+func reviewCompanionName(state reviewState, num int) string {
+	if state.Change != "" {
+		return companionName(state.Change, state.Worker.Harness, "plan", num)
+	}
+	return companionName(state.For, state.Worker.Harness, "review", num)
 }
 
 // reviewOutput is the output contract of an interactive round: the reviewer

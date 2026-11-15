@@ -554,3 +554,84 @@ func TestReviewSendPlanRoundHasNoScopeFingerprint(t *testing.T) {
 		t.Fatal("a plan round must not record a scope fingerprint")
 	}
 }
+
+// forRun rewrites dir's worker.json as a diff review started with --for.
+func forRun(t *testing.T, dir string, interactive bool) {
+	t.Helper()
+	st := reviewState{Worker: config.Worker{Harness: "codex"}, Base: "develop", For: "add-auth", Session: "T-1", Interactive: interactive}
+	if err := rundir.WriteJSON(dir, workerFile, st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A run started with --for is a diff review in every later command; a run
+// without the field (an older agk) behaves as it always did.
+func TestForRunIsADiffReviewInSendWaitFreshClose(t *testing.T) {
+	for name, prep := range map[string]func(*testing.T, string){
+		"for": func(t *testing.T, dir string) { forRun(t, dir, true) },
+		"no for": func(t *testing.T, dir string) {
+			st := reviewState{Worker: config.Worker{Harness: "codex"}, Base: "develop", Session: "T-1", Interactive: true}
+			if err := rundir.WriteJSON(dir, workerFile, st); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := "develop"
+			planCalled := func(context.Context, string, string) (review.PlanScope, error) {
+				t.Fatal("a diff run must not collect a plan scope")
+				return review.PlanScope{}, nil
+			}
+
+			// send: round 2 is a diff round against the recorded base.
+			h := newHarness(t, true)
+			root, dir := sendDir(t, h, "T-1", true)
+			prep(t, dir)
+			seen := scriptScope(h, root)
+			h.env.CollectPlan = planCalled
+			h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+			if code := runSend(h, dir); code != 0 {
+				t.Fatalf("send: exit %d: %s", code, h.err)
+			}
+			if !reflect.DeepEqual(*seen, []string{root, base}) {
+				t.Fatalf("send collect = %q, want the recorded base", *seen)
+			}
+			if !exists(scopeFilePath(dir, 2)) {
+				t.Fatal("round 2 of a diff run records a scope fingerprint")
+			}
+
+			// wait
+			h = newHarness(t, true)
+			_, dir = sendDir(t, h, "T-1", true)
+			prep(t, dir)
+			if code := runWait(h, dir); code != 0 || !strings.Contains(h.out.String(), `"status":"completed"`) {
+				t.Fatalf("wait: exit %d: %s / %s", code, h.out, h.err)
+			}
+
+			// fresh
+			h = newHarness(t, true)
+			root, dir = freshDir(t, h, scopeFingerprint)
+			prep(t, dir)
+			seen = scriptScope(h, root)
+			h.env.CollectPlan = planCalled
+			if code := runFresh(h, dir); code != 0 {
+				t.Fatalf("fresh: exit %d: %s", code, h.err)
+			}
+			if want := `{"fresh":true,"round":1}` + "\n"; h.out.String() != want {
+				t.Fatalf("fresh stdout = %q, want %q", h.out, want)
+			}
+			if !reflect.DeepEqual(*seen, []string{root, base}) {
+				t.Fatalf("fresh collect = %q, want the recorded base", *seen)
+			}
+
+			// close
+			h = newHarness(t, true)
+			_, dir = sendDir(t, h, "T-1", true)
+			prep(t, dir)
+			if code := runClose(h, dir); code != 0 {
+				t.Fatalf("close: exit %d: %s", code, h.err)
+			}
+			assertCalls(t, h.ctl, agtermtest.Call{Method: "Close", Args: []string{"C-1"}})
+		})
+	}
+}

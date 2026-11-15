@@ -47,6 +47,17 @@ var (
 	reviewerWorker = workerRole{"reviewer", "start a new review"}
 )
 
+// companionName is the sidebar name of a worker companion: <harness>-<kind> #N,
+// prefixed with "<change> · " when the change is known. The name reaches
+// agtermctl as its own argv element, so the separator needs no quoting.
+func companionName(change, harness, kind string, num int) string {
+	name := fmt.Sprintf("%s-%s #%d", harness, kind, num)
+	if change == "" {
+		return name
+	}
+	return change + " · " + name
+}
+
 // markStarted records that round k was seen active, so a later idle status
 // means its turn is over rather than not begun.
 func markStarted(dir string, k int) {

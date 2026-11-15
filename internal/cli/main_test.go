@@ -61,7 +61,7 @@ func TestReviewStartHelpExitsZero(t *testing.T) {
 // Every usage text documents the plan review mode, and `review start -h`
 // lists the flag.
 func TestUsageDocumentsChange(t *testing.T) {
-	const line = "agk review start [--base REF | --change NAME] [--reviewer H[:M]]"
+	const line = "agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]"
 	for name, text := range map[string]string{"usage": usage, "review usage": reviewUsage} {
 		if !strings.Contains(text, line) {
 			t.Errorf("%s lacks %q", name, line)
@@ -69,7 +69,7 @@ func TestUsageDocumentsChange(t *testing.T) {
 	}
 	h := newHarness(t, true)
 	h.env.Main(context.Background(), []string{"review", "start", "-h"})
-	if !strings.Contains(h.err.String(), "-change") {
+	if !strings.Contains(h.err.String(), "-change") || !strings.Contains(h.err.String(), "-for") {
 		t.Fatalf("review start -h = %q", h.err)
 	}
 }

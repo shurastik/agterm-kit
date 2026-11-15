@@ -59,7 +59,7 @@ agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pu
 agk apply wait <dir>                         # {"status":"done|blocked|needs-human|cancelled|running","round":K,...}
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
-agk review start [--base main | --change <change>] [--reviewer H[:M]]
+agk review start [--base main [--for <change>] | --change <change>] [--reviewer H[:M]]
                                              # reviewer companion; prints {"companion","dir","started"}
                                              # (inline: {"companion":null,"dir"});
                                              # --change reviews an OpenSpec change's plan, not a diff

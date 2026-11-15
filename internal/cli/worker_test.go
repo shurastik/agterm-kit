@@ -441,3 +441,20 @@ func TestTypeWhenIdleRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestCompanionName(t *testing.T) {
+	tests := []struct {
+		change, harness, kind string
+		num                   int
+		want                  string
+	}{
+		{"", "codex", "review", 3, "codex-review #3"},
+		{"add-auth", "claude", "apply", 1, "add-auth · claude-apply #1"},
+		{"add-auth", "codex", "plan", 8, "add-auth · codex-plan #8"},
+	}
+	for _, tt := range tests {
+		if got := companionName(tt.change, tt.harness, tt.kind, tt.num); got != tt.want {
+			t.Errorf("companionName(%q, %q, %q, %d) = %q, want %q", tt.change, tt.harness, tt.kind, tt.num, got, tt.want)
+		}
+	}
+}

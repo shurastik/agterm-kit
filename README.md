@@ -42,7 +42,7 @@ inline in the foreground instead.
 The loop, with the agent skills driving it:
 
 0. `/agk-explore` thinks an idea through with the project's OpenSpec explore workflow and, when it
-   is settled, hands it to `/agk-propose` instead of `/opsx:propose`.
+   is settled, hands it to `/agk-propose` instead of `/openspec-propose`.
 1. `/agk-propose` writes an OpenSpec change (proposal, specs, design, tasks), has the reviewer check
    the plan until it approves, lets you annotate it in revdiff, and stops.
 2. `/agk-apply <change>` runs the applier loop: `agk apply start` launches the applier, which works

@@ -92,7 +92,7 @@ companion stays open between rounds; you close it when the loop is over.
    ```bash
    agk review close <dir>
    ```
-   ⌘Z in agterm brings the companion back. Then continue the workflow (`/opsx:verify`).
+   ⌘Z in agterm brings the companion back. Then continue the workflow (`/openspec-verify-change`).
 
 ## Is the code still what the reviewer saw?
 

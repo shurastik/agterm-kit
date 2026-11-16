@@ -27,7 +27,7 @@ operations:
         in the same change; internal refactors do not touch it.
       - >-
         Implementation is not done when the tasks are checked. After the last task: run the quality
-        gates, then the codex review of the diff until clean, then /opsx:verify (openspec-verify-change)
+        gates, then the codex review of the diff until clean, then /openspec-verify-change
         right away, without asking. The change is not complete until verify reports 0 CRITICAL.
       - >-
         Verify CRITICAL is a blocker: fix it, run a codex review of the fix, then rerun verify.
@@ -35,5 +35,5 @@ operations:
   archive:
     guidance:
       - >-
-        Precondition: /opsx:verify must have passed with 0 CRITICAL after the last codex review.
+        Precondition: /openspec-verify-change must have passed with 0 CRITICAL after the last codex review.
         If it has not, run verify now and do not archive until it is clean.

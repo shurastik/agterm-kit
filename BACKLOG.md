@@ -3,6 +3,12 @@
 Known bugs and follow-ups, newest first. Each entry becomes an OpenSpec change (`/agk-explore`)
 when it is picked up.
 
+## Explore/propose guards target `/opsx:*`, stock OpenSpec 2.0 names skills instead
+
+**Type:** task · **Priority:** P2
+
+OpenSpec 2.0 (2026-11-16) removed the `/opsx:*` slash commands. The stock `openspec-explore` now ends with "Use the `openspec-propose` skill" and `openspec-propose` with "use the `openspec-apply-change` skill or ask me to apply this change". The guards in `skills/agk-explore` (description and lines ~34–35), `skills/agk-propose` (~131), `openspec/specs/explore-workflow` and `openspec/specs/propose-workflow`, and the evals (`evals/cases/idea-settled`, `evals/cases/plan-done`, `evals/_fixtures/stubs/openspec-*`, `evals/README.md`) still forbid only `/opsx:propose` / `/opsx:apply`, so the new stock handoff text passes through. Update the specs, skills and eval graders/stubs to the 2.0 wording (behavioural spec change, goes through `/agk-explore`).
+
 ## `agk review fresh` goes stale after committing on the base branch
 
 **Seen:** 2026-11-08, archiving `agk-explore-archive`. The work was done directly on `main` and

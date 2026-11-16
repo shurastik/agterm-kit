@@ -20,7 +20,7 @@ artifacts instead of a diff. The `agk-propose` skill (`/agk-propose`) runs the p
 the project's `openspec-propose` workflow writes the change, the reviewer reviews it until it
 approves, the user annotates it in revdiff, and the skill stops before implementation. The
 `agk-explore` skill (`/agk-explore`) is the step before it: it follows the project's
-`openspec-explore` workflow and hands a settled idea to `/agk-propose` instead of `/opsx:propose`.
+`openspec-explore` workflow and hands a settled idea to `/agk-propose` instead of `/openspec-propose`.
 The `agk-archive` skill (`/agk-archive`) is the close step: it archives through the project's
 `openspec-archive-change` only after the last code review approved the code as it is now (this
 session's own `agk review` results plus `agk review fresh`, else a fallback `agk review start
@@ -156,7 +156,7 @@ reviewer's only writable directory `out/` (it writes `out/<k>.json`) and, for cl
 
 ## Workflow
 
-Follow `~/.claude/CLAUDE.md`: OpenSpec explore -> propose -> apply (TDD) -> codex review -> `/opsx:verify`
+Follow `~/.claude/CLAUDE.md`: OpenSpec explore -> propose -> apply (TDD) -> codex review -> `/openspec-verify-change`
 (0 CRITICAL) -> archive. Open work lives in `BACKLOG.md` (see Task tracking).
 
 ## Task tracking

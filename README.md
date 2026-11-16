@@ -45,8 +45,9 @@ The loop, with the agent skills driving it:
    is settled, hands it to `/agk-propose` instead of `/opsx:propose`.
 1. `/agk-propose` writes an OpenSpec change (proposal, specs, design, tasks), has the reviewer check
    the plan until it approves, lets you annotate it in revdiff, and stops.
-2. `agk apply start <change>` launches the applier, which works through the tasks and writes a
-   report; `agk apply wait` returns it.
+2. `/agk-apply <change>` runs the applier loop: `agk apply start` launches the applier, which works
+   through the tasks and writes a report; `agk apply wait` returns it, `agk apply send` hands it
+   findings for the next round.
 3. `agk review start` reviews the diff in the reviewer companion; `agk review wait` returns the
    findings.
 4. Findings go to the applier with `agk apply send` for the next round, then `agk review send`

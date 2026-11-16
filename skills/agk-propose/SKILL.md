@@ -126,8 +126,11 @@ agk review close <dir>
 ```
 
 Tell the user, briefly: the change name, the review rounds and the final verdict, what the user's
-revdiff pass changed, any findings set aside, and that the plan is ready for `/opsx:apply` or
-`agk apply start <change>`. Then stop. Never start `agk apply` or implement anything yourself.
+revdiff pass changed, any findings set aside, and that the plan is ready for `/agk-apply <change>`,
+the only next step you name. It replaces whatever the `openspec-propose` workflow suggested
+(`/opsx:apply`, "ask me to apply", `agk apply start`): never name `/opsx:apply` or
+`agk apply start`, however that workflow ended. Then stop. Never start `agk apply`, invoke
+`/agk-apply` or implement anything yourself.
 
 ## Notes
 

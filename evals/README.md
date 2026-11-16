@@ -27,7 +27,7 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `case-plugins/<case>/` | The plugin each case loads (`case.yaml` `plugins:`): manifest plus symlinks to the skill under test (`skills/agk-propose`, `skills/agk-explore` or `skills/agk-archive`) and the stubs that case needs |
 | `_fixtures/bin/agk`, `_fixtures/bin/revdiff` | Stand-ins |
 | `_fixtures/bin/git` | Runs the real git binary behind Apple's `/usr/bin/git` shim, which fails in the agent's Bash sandbox; the worktree cases need it because the agent runs git itself there |
-| `_fixtures/stubs/openspec-propose`, `openspec-explore`, `openspec-verify-change`, `openspec-archive-change`, `revdiff` (under `_fixtures/stubs/`) | Stub skills |
+| `_fixtures/stubs/openspec-propose`, `openspec-explore`, `openspec-verify-change`, `openspec-archive-change`, `revdiff`, `agk-apply` (under `_fixtures/stubs/`) | Stub skills |
 | `_fixtures/write-change.sh` | Writes the fixed change `add-widget` for the `openspec-propose` stub |
 | `_fixtures/verify.sh`, `_fixtures/archive.sh` | Check results and archive step for the `openspec-verify-change` and `openspec-archive-change` stubs |
 | `_fixtures/scaffold-archive.sh` | Archive-case workspace: the change `add-widget`, an uncommitted code file, pre-created `.agk/` runs; `--worktree` makes the workspace a linked worktree of a main repository next to it (`<workspace>.main`) on branch `add-widget` with `branch.add-widget.agkBase = main`, `--main-branch` stands the workspace repository itself on that branch with the base recorded, `--branch` does the same without a recorded base |
@@ -112,6 +112,9 @@ review) and then to run the `agk-archive` skill.
   <change>`, moves the change under `openspec/changes/archive/`, or fails with `archive-fail`).
 - The `openspec-explore` stub sets the explore stance (no writes outside `openspec/changes/`) and
   ends by suggesting `/opsx:propose`, which `agk-explore` must replace with `/agk-propose`.
+- The `agk-apply` stub carries the real skill's name and description, so it is as discoverable as in
+  production; its body runs `agk apply start <change>` (only logged). Only the `plan-done` case plugin
+  loads it, to check that `agk-propose` does not invoke it.
 - "Project without OpenSpec skills" leaves the `openspec-propose` (or `openspec-explore`) stub out
   of its case plugin, "revdiff missing" the `revdiff` stub.
 

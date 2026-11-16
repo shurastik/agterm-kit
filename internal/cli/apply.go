@@ -38,6 +38,10 @@ type applyState struct {
 	Worker  config.Worker `json:"worker"`
 	Change  string        `json:"change"`
 	Session string        `json:"session,omitempty"`
+	// TurnHooks is set when the run's settings carry the turn-state hooks:
+	// only then does `agk apply wait` read turn.json. Codex runs and runs of
+	// an older agk decide from the agent status alone.
+	TurnHooks bool `json:"turn_hooks,omitempty"`
 }
 
 var changeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -83,6 +87,8 @@ func (e *Env) applyCmd(ctx context.Context, args []string) int {
 		return e.ApplySend(ctx, args[1:])
 	case "close":
 		return e.ApplyClose(ctx, args[1:])
+	case "hook":
+		return e.ApplyHook(ctx, args[1:])
 	}
 	fmt.Fprintf(e.Stderr, "agk: unknown apply command %q\n\n%s", args[0], applyUsage)
 	return ExitError
@@ -92,14 +98,23 @@ func (e *Env) applyCmd(ctx context.Context, args []string) int {
 // file, because typed input and the companion command line are single lines.
 func kickoff(prompt string) string { return "Read " + prompt + " and follow it." }
 
-// applierFiles writes the claude applier's settings and rules into dir; a
-// codex applier gets its rules inside each prompt instead.
-func applierFiles(dir string, w config.Worker) (harness.ApplierFiles, error) {
+// applierFiles writes the claude applier's settings (deny rules and the
+// turn-state hooks) and rules into dir; a codex applier gets its rules inside
+// each prompt instead.
+func (e *Env) applierFiles(dir string, w config.Worker) (harness.ApplierFiles, error) {
 	if w.Harness != config.Claude {
 		return harness.ApplierFiles{}, nil
 	}
+	exe, err := e.Executable()
+	if err != nil {
+		return harness.ApplierFiles{}, fmt.Errorf("locate agk binary: %v", err)
+	}
+	settings, err := applierSettings(exe, dir)
+	if err != nil {
+		return harness.ApplierFiles{}, err
+	}
 	f := harness.ApplierFiles{Settings: filepath.Join(dir, settingsFile), Rules: filepath.Join(dir, rulesFile)}
-	if err := fsx.ReplaceFile(f.Settings, apply.ClaudeSettings(), 0o644); err != nil {
+	if err := fsx.ReplaceFile(f.Settings, settings, 0o644); err != nil {
 		return f, err
 	}
 	return f, fsx.ReplaceFile(f.Rules, []byte(apply.Rules()), 0o644)
@@ -175,12 +190,13 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 		return e.errorf("create run dir: %v", err)
 	}
 	st := applyState{Worker: w, Change: change}
-	if w.Harness == config.Claude {
-		st.Session = e.NewSessionID()
-	}
-	files, err := applierFiles(dir, w)
+	files, err := e.applierFiles(dir, w)
 	if err != nil {
 		return e.errorf("write applier files: %v", err)
+	}
+	if w.Harness == config.Claude {
+		st.Session = e.NewSessionID()
+		st.TurnHooks = true
 	}
 	report := filepath.Join(rundir.RoundDir(dir, 1), apply.ReportFile)
 	prompt, err := apply.FirstPrompt(change, report, inlineRules(w))
@@ -305,9 +321,12 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 	}
 	if report != nil || companion == "" {
 		// Inline runs finished before start/send returned.
-		return e.printJSON(apply.Decide(run.round, report, "completed", nil))
+		return e.printJSON(apply.Decide(run.round, report, "completed", nil, nil))
 	}
 	left := time.Duration(timeout) * time.Second
+	if run.state.TurnHooks {
+		return e.waitHooked(ctx, run, companion, left)
+	}
 	var status string
 	var werr error
 	found := false
@@ -335,7 +354,7 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 	if report, err = readReport(run.dir, run.round); err != nil {
 		return e.errorf("%v", err)
 	}
-	return e.printJSON(apply.Decide(run.round, report, status, werr))
+	return e.printJSON(apply.Decide(run.round, report, status, werr, nil))
 }
 
 // sendRound is the stdout of `apply send`. Started is set only inside agterm,

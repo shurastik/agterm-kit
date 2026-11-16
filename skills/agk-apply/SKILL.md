@@ -55,7 +55,11 @@ in.
      `no-report` (the turn ended without a report, often a question) or `invalid-report`. Tell the
      user to look at the companion; wait again or send a note once it is resolved.
    - `cancelled`: the user closed the companion. Ask before starting over.
-   - `running`: the timeout passed; wait again.
+   - `running`: the timeout passed; wait again. With `reason` `background` (and a `background` count)
+     the applier ended its turn with background work still in flight (a test run, a shell or a
+     monitor, a scheduled wakeup) and will resume by itself: this is a pause, not a question. Wait
+     again. If the next wait ends the same way, show the user the `background` count and point
+     them at the applier companion: the task may never end.
 
 3. **Send** the next round: review findings, the user's notes, or both, as markdown:
    ```bash

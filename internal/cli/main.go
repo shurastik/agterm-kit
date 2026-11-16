@@ -42,6 +42,9 @@ Usage:
   agk apply wait <run-dir> [--timeout SECONDS]
                                   Wait for the current round (default 3600 s); prints
                                   {"status":"done|blocked|needs-human|cancelled|running","round":K,...}.
+                                  running with "reason":"background" and a "background" count: a claude
+                                  applier ended its turn with background work in flight and will resume
+                                  by itself; wait again.
   agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]
                                   Start the next round with findings or notes once the applier's
                                   turn is over (default 600 s); prints {"round":K}.

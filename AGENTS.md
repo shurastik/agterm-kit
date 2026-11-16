@@ -57,6 +57,8 @@ agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pu
                                              # worktree mode ([applier] worktree = true): pull the base --ff-only
                                              # (--no-pull skips), commit the plan, run in .worktrees/<change>
 agk apply wait <dir>                         # {"status":"done|blocked|needs-human|cancelled|running","round":K,...}
+                                             # claude run with turn hooks (turn.json): a turn that ended with background
+                                             # work in flight is a pause: running + "reason":"background"
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
 agk review start [--base main [--for <change>] | --change <change>] [--reviewer H[:M]]
@@ -132,6 +134,10 @@ reviewer's only writable directory `out/` (it writes `out/<k>.json`) and, for cl
 - Worker state lives on disk (`worker.json`, `round`, `rounds/<k>/result.json`, `report.json` or the
   reviewer's `out/<k>.json`); agterm status is only the wake-up signal. A run is pinned to the
   configuration it started with.
+- A claude applier's settings carry two agk hooks (hidden `agk apply hook turn|stop <run>`) that record
+  `<run>/turn.json` (round, `running`/`stopped`, in-flight counts). The round comes from the kickoff
+  line the applier received, never from `<run>/round` (`agk apply send` moves that from outside). The
+  hooks print nothing and exit 0 always. `worker.json` `turn_hooks` opts a run into reading it.
 - The interactive applier and reviewer keep their `AGTERM_*` variables: their harness hooks are how
   agk learns that a turn ended, and agk never sets a worker companion's agent status itself (it sets
   only info lines). A claude reviewer runs `--restricted`, which drops the user's hooks, so agk

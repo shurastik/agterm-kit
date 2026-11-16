@@ -162,6 +162,15 @@ prompt in its companion: answer it there, then wait. `needs-human` means the wor
 companion: a question, a permission prompt (`reason` `permission`), or a turn that ended without its
 report or findings file (`no-report` / `no-output`). Nothing is recorded; wait again once it is done.
 
+A claude applier often starts long work (a test suite, an eval run) as a background shell and ends
+its turn, then resumes by itself when the work finishes. `agk apply wait` does not read that as a
+question: the applier's hooks record in `<run dir>/turn.json` whether its turn ended with background
+tasks or scheduled wakeups in flight, and while they are, the wait goes on until the report appears.
+When the timeout passes during such a pause it prints `{"status":"running","round":1,"reason":"background","background":2}`,
+where `background` counts the tasks and wakeups in flight; wait again. A turn that ended with nothing
+in flight and no report is still `needs-human` / `no-report`. Codex appliers and runs started by an
+older agk have no such hooks and keep deciding from the agent status alone.
+
 A completed review has its findings in `<run dir>/rounds/<round>/review.json`. Send them on and
 re-review:
 

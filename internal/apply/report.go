@@ -52,12 +52,25 @@ type Outcome struct {
 	Summary  string `json:"summary,omitempty"`
 	Problem  string `json:"problem,omitempty"`
 	Artifact string `json:"artifact,omitempty"`
+	// Background is the number of background tasks and wakeups in flight when
+	// the applier is paused (Reason "background").
+	Background int `json:"background,omitempty"`
 }
 
+// ReasonBackground marks a running outcome whose applier ended its turn with
+// work in flight: it is paused, waiting to be woken up.
+const ReasonBackground = "background"
+
 // Decide maps round k's report (nil when absent), the companion's matched
-// status and the wait error (nil, agterm.ErrGone or agterm.ErrTimeout) to an
-// outcome. A report, when present, always decides.
-func Decide(k int, report []byte, status string, waitErr error) Outcome {
+// status, the wait error (nil, agterm.ErrGone or agterm.ErrTimeout) and the
+// recorded turn state to an outcome. A report, when present, always decides.
+//
+// turn is the applier's turn state, nil when the run records none. Only a turn
+// state of round k counts; one of another round is treated as missing, which
+// decides from the status alone. A turn that is still running, or that ended
+// with work in flight, is not over whatever the status says: it keeps the
+// outcome `running`, with reason "background" for the paused one.
+func Decide(k int, report []byte, status string, waitErr error, turn *Turn) Outcome {
 	if report != nil {
 		r, err := ParseReport(report)
 		if err != nil {
@@ -65,15 +78,26 @@ func Decide(k int, report []byte, status string, waitErr error) Outcome {
 		}
 		return Outcome{Status: r.Status, Round: k, Progress: r.Progress, Summary: r.Summary, Problem: r.Problem, Artifact: r.Artifact}
 	}
+	var current *Turn
+	if turn != nil && turn.Round == k {
+		current = turn
+	}
+	running := Outcome{Status: "running", Round: k}
+	if current != nil && current.Paused() {
+		running.Reason, running.Background = ReasonBackground, current.InFlight()
+	}
 	switch {
 	case errors.Is(waitErr, agterm.ErrGone):
 		return Outcome{Status: "cancelled", Round: k}
 	case errors.Is(waitErr, agterm.ErrTimeout):
-		return Outcome{Status: "running", Round: k}
+		return running
 	case status == "blocked":
 		return Outcome{Status: "needs-human", Round: k, Reason: "permission"}
 	case status == "completed" || status == "idle":
+		if current != nil && (current.State == TurnRunning || current.Paused()) {
+			return running
+		}
 		return Outcome{Status: "needs-human", Round: k, Reason: "no-report"}
 	}
-	return Outcome{Status: "running", Round: k}
+	return running
 }

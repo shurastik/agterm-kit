@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,8 +71,15 @@ func TestApplyStartClaude(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, rulesFile)); string(b) != apply.Rules() {
 		t.Fatal("rules file missing")
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, settingsFile)); string(b) != string(apply.ClaudeSettings()) {
-		t.Fatal("settings file missing")
+	wantSettings, err := applierSettings("/usr/local/bin/agk", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, settingsFile)); string(b) != string(wantSettings) {
+		t.Fatalf("settings file = %q, want %q", b, wantSettings)
+	}
+	if !s.TurnHooks {
+		t.Fatal("a claude run records its turn hooks in worker.json")
 	}
 	kickoff := "Read " + prompt + " and follow it."
 	wantCmd := "'claude' '--model=' '--session=SESS-NEW' '" + kickoff + "'"
@@ -103,8 +111,16 @@ func TestApplyStartCodex(t *testing.T) {
 	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · codex-apply #1" {
 		t.Fatalf("name = %q", name)
 	}
-	if s := readApplyState(t, dir); s.Session != "" || s.Worker.Model != "gpt-5.5" || s.Worker.PermissionMode != "" {
+	if s := readApplyState(t, dir); s.Session != "" || s.Worker.Model != "gpt-5.5" || s.Worker.PermissionMode != "" || s.TurnHooks {
 		t.Fatalf("worker.json = %+v", s)
+	}
+	for _, f := range []string{settingsFile, rulesFile} {
+		if exists(filepath.Join(dir, f)) {
+			t.Fatalf("codex run wrote %s", f)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "worker.json")); strings.Contains(string(b), "turn_hooks") {
+		t.Fatalf("worker.json = %s", b)
 	}
 	p, _ := os.ReadFile(filepath.Join(dir, "rounds", "1", "prompt.md"))
 	if !strings.HasPrefix(string(p), apply.Rules()) {
@@ -113,6 +129,55 @@ func TestApplyStartCodex(t *testing.T) {
 	if cmd := h.ctl.Calls[0].Args[2]; !strings.HasPrefix(cmd, "'codex' '--model=gpt-5.5' '--session=' ") {
 		t.Fatalf("cmd = %q", cmd)
 	}
+}
+
+// A claude run whose hook command cannot be quoted is refused before any
+// companion exists.
+func TestApplyStartRefusesPathsThatCannotGoIntoAHookCommand(t *testing.T) {
+	t.Run("agk binary", func(t *testing.T) {
+		h := newHarness(t, true)
+		root := repoWith(t, h, "")
+		h.env.Executable = func() (string, error) { return `/opt/a\b/agk`, nil }
+		h.ctl.WaitStatus = "active"
+		if code := runApply(h, "start", "add-auth"); code != 1 {
+			t.Fatalf("exit %d, stdout %q", code, h.out)
+		}
+		if !strings.Contains(h.err.String(), strconv.Quote(`/opt/a\b/agk`)) {
+			t.Fatalf("stderr = %q, want the path named", h.err)
+		}
+		if h.out.Len() != 0 || len(h.ctl.Calls) != 0 {
+			t.Fatalf("stdout %q, calls %v: no companion may be created", h.out, h.ctl.Calls)
+		}
+		if exists(filepath.Join(applyDir(root), CompanionFile)) {
+			t.Fatal("companion file written")
+		}
+	})
+	t.Run("run directory, inline", func(t *testing.T) {
+		h := newHarness(t, false)
+		bad := filepath.Join(t.TempDir(), `a\b`)
+		if err := os.MkdirAll(bad, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		h.env.RepoRoot = func(context.Context, string) (string, error) { return bad, nil }
+		if code := runApply(h, "start", "add-auth"); code != 1 {
+			t.Fatalf("exit %d, stdout %q", code, h.out)
+		}
+		if !strings.Contains(h.err.String(), strconv.Quote(applyDir(bad))) {
+			t.Fatalf("stderr = %q, want the path named", h.err)
+		}
+		if len(h.drivers["claude"].headless) != 0 {
+			t.Fatal("the applier must not run")
+		}
+	})
+	t.Run("codex needs no hook command", func(t *testing.T) {
+		h := newHarness(t, true)
+		repoWith(t, h, "")
+		h.env.Executable = func() (string, error) { return `/opt/a\b/agk`, nil }
+		h.ctl.WaitStatus = "active"
+		if code := runApply(h, "start", "--applier", "codex", "add-auth"); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.err)
+		}
+	})
 }
 
 func TestApplyStartRefusals(t *testing.T) {
@@ -301,6 +366,7 @@ func TestApplyWait(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, true)
 			dir := startedApply(t, h, 1)
+			setTurnHooks(t, dir, false) // the status alone decides: see apply_wait_hooked_test.go for hooked runs
 			c.prep(h, dir)
 			if code := runApply(h, append([]string{"wait", dir}, c.args...)...); code != 0 {
 				t.Fatalf("exit %d: %s", code, h.err)
@@ -481,6 +547,7 @@ func TestApplyWaitBeforeTheRoundStarted(t *testing.T) {
 	if exists(filepath.Join(rundir.RoundDir(dir, 1), startedFile)) {
 		t.Fatal("an unconfirmed round must not be marked started")
 	}
+	setTurnHooks(t, dir, false) // the old path: hooked runs are in apply_wait_hooked_test.go
 	h = newHarnessLike(t, h)
 	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "active"}, {Status: "completed"}}
 	n := 0

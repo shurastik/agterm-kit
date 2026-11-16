@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -54,9 +55,67 @@ func TestDecide(t *testing.T) {
 		{"wrapped gone", nil, "", errors.Join(agterm.ErrGone, errors.New("x")), Outcome{Status: "cancelled", Round: 2}},
 	}
 	for _, c := range cases {
-		got := Decide(2, c.report, c.status, c.err)
+		got := Decide(2, c.report, c.status, c.err, nil)
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestDecideWithTurnState(t *testing.T) {
+	done := []byte(`{"status":"done","summary":"all green"}`)
+	running := &Turn{Round: 2, State: TurnRunning}
+	stopped0 := &Turn{Round: 2, State: TurnStopped}
+	paused := &Turn{Round: 2, State: TurnStopped, Background: 2, Wakeups: 1}
+	wakeups := &Turn{Round: 2, State: TurnStopped, Wakeups: 1}
+	earlier := &Turn{Round: 1, State: TurnStopped}
+	earlierPaused := &Turn{Round: 1, State: TurnStopped, Background: 1}
+	later := &Turn{Round: 3, State: TurnStopped, Background: 1}
+	noReport := Outcome{Status: "needs-human", Round: 2, Reason: "no-report"}
+	pause := Outcome{Status: "running", Round: 2, Reason: "background", Background: 3}
+	plain := Outcome{Status: "running", Round: 2}
+	cases := []struct {
+		name   string
+		report []byte
+		status string
+		err    error
+		turn   *Turn
+		want   Outcome
+	}{
+		{"report beats a pause", done, "completed", nil, paused, Outcome{Status: "done", Round: 2, Summary: "all green"}},
+		{"report beats a running turn", done, "completed", nil, running, Outcome{Status: "done", Round: 2, Summary: "all green"}},
+		{"paused, status completed: keep waiting", nil, "completed", nil, paused, pause},
+		{"paused, status idle: keep waiting", nil, "idle", nil, paused, pause},
+		{"paused on wakeups only", nil, "completed", nil, wakeups, Outcome{Status: "running", Round: 2, Reason: "background", Background: 1}},
+		{"paused, timeout", nil, "", agterm.ErrTimeout, paused, pause},
+		{"paused, no status yet", nil, "", nil, paused, pause},
+		{"stopped with nothing in flight, completed", nil, "completed", nil, stopped0, noReport},
+		{"stopped with nothing in flight, idle", nil, "idle", nil, stopped0, noReport},
+		{"stopped with nothing in flight, timeout", nil, "", agterm.ErrTimeout, stopped0, plain},
+		{"running turn, status completed: the hook lags", nil, "completed", nil, running, plain},
+		{"running turn, status idle", nil, "idle", nil, running, plain},
+		{"running turn, timeout", nil, "", agterm.ErrTimeout, running, plain},
+		{"permission while paused", nil, "blocked", nil, paused, Outcome{Status: "needs-human", Round: 2, Reason: "permission"}},
+		{"permission while running", nil, "blocked", nil, running, Outcome{Status: "needs-human", Round: 2, Reason: "permission"}},
+		{"gone while paused", nil, "", agterm.ErrGone, paused, Outcome{Status: "cancelled", Round: 2}},
+		{"gone after stopped with nothing", nil, "", agterm.ErrGone, stopped0, Outcome{Status: "cancelled", Round: 2}},
+		{"earlier round's stopped state counts as missing", nil, "completed", nil, earlier, noReport},
+		{"earlier round's pause counts as missing", nil, "completed", nil, earlierPaused, noReport},
+		{"earlier round's pause, timeout", nil, "", agterm.ErrTimeout, earlierPaused, plain},
+		{"later round's state counts as missing", nil, "completed", nil, later, noReport},
+		{"no turn state: status only", nil, "completed", nil, nil, noReport},
+	}
+	for _, c := range cases {
+		got := Decide(2, c.report, c.status, c.err, c.turn)
+		if got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestOutcomeJSONOfAPause(t *testing.T) {
+	b, err := json.Marshal(Decide(1, nil, "", agterm.ErrTimeout, &Turn{Round: 1, State: TurnStopped, Background: 2}))
+	if err != nil || string(b) != `{"status":"running","round":1,"reason":"background","background":2}` {
+		t.Fatalf("%s, %v", b, err)
 	}
 }

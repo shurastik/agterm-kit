@@ -1,6 +1,6 @@
 schema_version: "1.0"
 name: idea-settled
-description: "Idea settled: the last message names /agk-propose and not /opsx:propose, nothing is written outside openspec/changes/ and no agk command runs."
+description: "Idea settled: the last message names /agk-propose and neither `openspec-propose` nor `openspec-apply-change`, nothing is written outside openspec/changes/ and no agk command runs."
 plugins: ["../../case-plugins/idea-settled"]
 context:
   scaffold_script: scaffold.sh

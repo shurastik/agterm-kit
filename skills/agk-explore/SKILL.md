@@ -2,9 +2,9 @@
 name: agk-explore
 description: >
   Think an idea through with the project's OpenSpec explore workflow, then hand it to /agk-propose
-  instead of /opsx:propose, so the plan goes through the reviewer. It follows the project's
-  `openspec-explore` skill unchanged and only swaps the handoff. Use only when explicitly invoked:
-  /agk-explore, "agk explore".
+  instead of the stock `openspec-propose` handoff, so the plan goes through the reviewer. It
+  follows the project's `openspec-explore` skill unchanged and only swaps the handoff. Use only
+  when explicitly invoked: /agk-explore, "agk explore".
 ---
 
 # agk explore
@@ -30,10 +30,11 @@ paraphrase that skill here; it is kept current by `openspec update`.
 
 ## 2. Handoff
 
-Whenever the exploration is ready to become a change, or a change was captured, and the skill would
-suggest `/opsx:propose` (or any way to start the proposal or the implementation), name
-**`/agk-propose`** as the next step instead. Never name `/opsx:propose`, in the last message or in
-the closing summary. `/agk-propose` writes the change and has the reviewer check the plan before
-anyone implements it.
+Whenever the exploration is ready to become a change, or a change was captured, name
+**`/agk-propose`** as the only next step, whatever the project's `openspec-explore` skill suggests.
+Never name any other way to start the proposal or the implementation, whether a slash command, a
+skill name or an "ask me to" phrase, for example the `openspec-propose` or `openspec-apply-change`
+skill, in the last message or in the closing summary. `/agk-propose` writes the change and has the
+reviewer check the plan before anyone implements it.
 
 Only name the next step. Never start `/agk-propose`, `agk review` or `agk apply` yourself.

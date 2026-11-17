@@ -3,11 +3,11 @@
 Known bugs and follow-ups, newest first. Each entry becomes an OpenSpec change (`/agk-explore`)
 when it is picked up.
 
-## Explore/propose guards target `/opsx:*`, stock OpenSpec 2.0 names skills instead
+## Codex reviewer stuck `active` after the hooks-trust prompt, `agk review send` times out
 
-**Type:** task · **Priority:** P2
+**Type:** bug · **Priority:** P2
 
-OpenSpec 2.0 (2026-11-16) removed the `/opsx:*` slash commands. The stock `openspec-explore` now ends with "Use the `openspec-propose` skill" and `openspec-propose` with "use the `openspec-apply-change` skill or ask me to apply this change". The guards in `skills/agk-explore` (description and lines ~34–35), `skills/agk-propose` (~131), `openspec/specs/explore-workflow` and `openspec/specs/propose-workflow`, and the evals (`evals/cases/idea-settled`, `evals/cases/plan-done`, `evals/_fixtures/stubs/openspec-*`, `evals/README.md`) still forbid only `/opsx:propose` / `/opsx:apply`, so the new stock handoff text passes through. Update the specs, skills and eval graders/stubs to the 2.0 wording (behavioural spec change, goes through `/agk-explore`).
+A codex reviewer that started on codex's "Hooks need review" screen (`agk review start` printed `"started":false`) and was then trusted by the user ran round 1 and wrote `out/1.json` (`agk review wait` completed), but its agterm session status stayed `active` from the start on (`statusChangedAt` never moved). `agk review send` then waited for the turn to end and failed after 600 s with `the reviewer … is busy: its turn did not end within 600 s`. Closing it and starting a fresh run (hooks already trusted) worked. Find out whether codex skips the hooks of the session in which they were trusted, and make `send` cope (e.g. accept a validated `out/<k>.json` of the current round as "turn over", or tell the user to restart the reviewer).
 
 ## Review companion name: plan/code kind and round number (was agk-7t2)
 

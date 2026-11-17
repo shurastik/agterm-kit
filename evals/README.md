@@ -118,7 +118,11 @@ review) and then to run the `agk-archive` skill.
   the real skill. The `openspec-archive-change` stub runs `.eval/archive.sh <change>` (logs `archive
   <change>`, moves the change under `openspec/changes/archive/`, or fails with `archive-fail`).
 - The `openspec-explore` stub sets the explore stance (no writes outside `openspec/changes/`) and
-  ends by suggesting `/opsx:propose`, which `agk-explore` must replace with `/agk-propose`.
+  ends like the stock 2.0 skill, suggesting the `openspec-propose` skill and naming
+  `openspec-apply-change`, which `agk-explore` must replace with `/agk-propose`.
+- The `openspec-propose` stub runs the scripted change (`.eval/write-change.sh`) and ends like the
+  stock 2.0 skill, suggesting the `openspec-apply-change` skill or "ask me to apply this change",
+  which `agk-propose` must replace with `/agk-apply <change>`.
 - The `agk-apply` stub carries the real skill's name and description, so it is as discoverable as in
   production; its body runs `agk apply start <change>` (only logged). Only the `plan-done` case plugin
   loads it, to check that `agk-propose` does not invoke it.

@@ -14,4 +14,5 @@ Explore mode is a stance, not a workflow: you are a thinking partner.
 - Run no command that changes the project.
 
 When the idea is settled and the user is ready to turn it into a change, summarize the decision in a
-few lines and suggest the next step: `/opsx:propose` creates the change with all its artifacts.
+few lines and suggest the next step: "Ready to start? Use the `openspec-propose` skill and this
+becomes a change; `openspec-apply-change` implements it once tasks exist."

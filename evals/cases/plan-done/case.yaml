@@ -1,6 +1,6 @@
 schema_version: "1.0"
 name: plan-done
-description: "Plan done: the last message names the change and `/agk-apply <change>` as the next step, never `/opsx:apply` or `agk apply start`, and no agk apply ran and the agk-apply skill was not invoked."
+description: "Plan done: the last message names the change and `/agk-apply <change>` as the next step, never `openspec-apply-change`, \"ask me to apply\" or `agk apply start`, and no agk apply ran and the agk-apply skill was not invoked."
 plugins: ["../../case-plugins/plan-done"]
 context:
   scaffold_script: scaffold.sh

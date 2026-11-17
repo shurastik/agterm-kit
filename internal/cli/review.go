@@ -301,10 +301,11 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		}
 		state = reviewState{Change: *change}
 	}
-	root, fingerprint, render, err := e.reviewScope(ctx, e.Cwd, state)
+	sc, render, err := e.reviewScope(ctx, e.Cwd, state)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	root := sc.root
 	cfg, err := e.resolveConfig(root, config.Flags{Reviewer: *reviewer})
 	if err != nil {
 		return e.errorf("%v", err)
@@ -344,7 +345,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		if err != nil {
 			return e.errorf("render prompt: %v", err)
 		}
-		if err := initRound(dir, 1, prompt, fingerprint); err != nil {
+		if err := initRound(dir, 1, prompt, sc.fingerprint, sc.mergeBase); err != nil {
 			return e.errorf("%v", err)
 		}
 		if err := rundir.WriteJSON(dir, workerFile, state); err != nil {
@@ -356,13 +357,14 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 		}
 		return code
 	}
-	return e.startInteractive(ctx, parent, root, dir, fingerprint, state, render)
+	return e.startInteractive(ctx, parent, dir, sc, state, render)
 }
 
 // startInteractive runs the reviewer as a harness TUI in a companion of
 // parent: round 1's prompt is written with the output-file contract and a
 // single typed-in line points the reviewer at it.
-func (e *Env) startInteractive(ctx context.Context, parent, root, dir, fingerprint string, state reviewState, render func(review.Output) (string, error)) int {
+func (e *Env) startInteractive(ctx context.Context, parent, dir string, sc roundScope, state reviewState, render func(review.Output) (string, error)) int {
+	root := sc.root
 	w := state.Worker
 	driver, err := e.Driver(w.Harness)
 	if err != nil {
@@ -376,7 +378,7 @@ func (e *Env) startInteractive(ctx context.Context, parent, root, dir, fingerpri
 	if err != nil {
 		return e.errorf("render prompt: %v", err)
 	}
-	if err := initRound(dir, 1, prompt, fingerprint); err != nil {
+	if err := initRound(dir, 1, prompt, sc.fingerprint, sc.mergeBase); err != nil {
 		return e.errorf("%v", err)
 	}
 	state.Interactive = true
@@ -426,61 +428,73 @@ func reviewOutput(harnessName, root, schema, file string) review.Output {
 	return review.Output{Schema: schema, File: file, Root: root, GitC: harnessName == config.Codex}
 }
 
-// reviewScope collects the scope of a run with state from dir and returns the
-// repository root, the fingerprint of the scope (empty for a plan review) and a
-// renderer of the first-round prompt for an Output. A plan review (state.Change
-// set) reads the change from disk; a diff review diffs against state.Base.
-func (e *Env) reviewScope(ctx context.Context, dir string, state reviewState) (string, string, func(review.Output) (string, error), error) {
+// roundScope is what a round's scope contributes besides its prompt: the
+// repository root and, for a diff round, the fingerprint of the scope and the
+// merge base it was built from. A plan round has no fingerprint and no merge base.
+type roundScope struct {
+	root, fingerprint, mergeBase string
+}
+
+// reviewScope collects the scope of a run with state from dir and returns its
+// roundScope and a renderer of the first-round prompt for an Output. A plan
+// review (state.Change set) reads the change from disk; a diff review diffs
+// against state.Base.
+func (e *Env) reviewScope(ctx context.Context, dir string, state reviewState) (roundScope, func(review.Output) (string, error), error) {
 	if state.Change != "" {
 		scope, err := e.CollectPlan(ctx, dir, state.Change)
 		if err != nil {
-			return "", "", nil, err
+			return roundScope{}, nil, err
 		}
-		return scope.Root, "", func(o review.Output) (string, error) { return review.PlanPrompt(scope, o) }, nil
+		return roundScope{root: scope.Root}, func(o review.Output) (string, error) { return review.PlanPrompt(scope, o) }, nil
 	}
 	scope, err := e.Collect(ctx, dir, state.Base)
 	if err != nil {
-		return "", "", nil, err
+		return roundScope{}, nil, err
 	}
-	return scope.Root, scope.Fingerprint, func(o review.Output) (string, error) { return review.Prompt(scope, o) }, nil
+	return roundScope{root: scope.Root, fingerprint: scope.Fingerprint, mergeBase: scope.MergeBase},
+		func(o review.Output) (string, error) { return review.Prompt(scope, o) }, nil
 }
 
 // reviewPrompt renders the prompt of round k of a run: the first-round prompt,
 // wrapped for a re-review when the reviewer has a live session to continue
 // (always, after round 1, in an interactive run; with a recorded session id
-// inline). It returns the repository root and the scope fingerprint (empty for
-// a plan review) with the prompt.
-func (e *Env) reviewPrompt(ctx context.Context, dir string, state reviewState, k int, note string, o review.Output) (root, fingerprint, prompt string, err error) {
-	root, fingerprint, render, err := e.reviewScope(ctx, dir, state)
+// inline). It returns the round's roundScope with the prompt.
+func (e *Env) reviewPrompt(ctx context.Context, dir string, state reviewState, k int, note string, o review.Output) (sc roundScope, prompt string, err error) {
+	sc, render, err := e.reviewScope(ctx, dir, state)
 	if err != nil {
-		return "", "", "", err
+		return roundScope{}, "", err
 	}
 	body, err := render(o)
 	if err != nil {
-		return "", "", "", fmt.Errorf("render prompt: %v", err)
+		return roundScope{}, "", fmt.Errorf("render prompt: %v", err)
 	}
 	resume := state.Session != ""
 	if state.Interactive {
 		resume = k > 1
 	}
 	if !resume {
-		return root, fingerprint, body, nil // nothing to resume: start over
+		return sc, body, nil // nothing to resume: start over
 	}
 	prompt, err = review.Rereview(body, k, note, o)
 	if err != nil {
-		return "", "", "", fmt.Errorf("render prompt: %v", err)
+		return roundScope{}, "", fmt.Errorf("render prompt: %v", err)
 	}
-	return root, fingerprint, prompt, nil
+	return sc, prompt, nil
 }
 
 // scopeFile is the round file holding the fingerprint of the scope its prompt
 // was built from; only diff rounds have one.
 const scopeFile = "scope.sha256"
 
+// mergeBaseFile is the round file holding the merge base the scope of a diff
+// round was built from, as a full commit id; plan rounds have none.
+const mergeBaseFile = "merge-base"
+
 // initRound creates rounds/<k>/prompt.md and records k as the current round. A
 // non-empty fingerprint (a diff round) goes to rounds/<k>/scope.sha256 first,
-// so it exists before any reviewer hears of the round.
-func initRound(dir string, k int, prompt, fingerprint string) error {
+// and a non-empty mergeBase to rounds/<k>/merge-base right after it, so both
+// exist before any reviewer hears of the round.
+func initRound(dir string, k int, prompt, fingerprint, mergeBase string) error {
 	rd, err := rundir.MakeRound(dir, k)
 	if err != nil {
 		return fmt.Errorf("create round dir: %v", err)
@@ -488,6 +502,11 @@ func initRound(dir string, k int, prompt, fingerprint string) error {
 	if fingerprint != "" {
 		if err := fsx.ReplaceFile(filepath.Join(rd, scopeFile), []byte(fingerprint+"\n"), 0o644); err != nil {
 			return fmt.Errorf("write scope fingerprint: %v", err)
+		}
+	}
+	if mergeBase != "" {
+		if err := fsx.ReplaceFile(filepath.Join(rd, mergeBaseFile), []byte(mergeBase+"\n"), 0o644); err != nil {
+			return fmt.Errorf("write merge base: %v", err)
 		}
 	}
 	if err := fsx.ReplaceFile(filepath.Join(rd, "prompt.md"), []byte(prompt), 0o644); err != nil {
@@ -579,11 +598,11 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 	if companion != "" {
 		o = reviewOutput(run.state.Worker.Harness, run.root, filepath.Join(run.dir, schemaName), outputPath(run.dir, k+1))
 	}
-	_, fingerprint, prompt, err := e.reviewPrompt(ctx, run.root, run.state, k+1, note, o)
+	sc, prompt, err := e.reviewPrompt(ctx, run.root, run.state, k+1, note, o)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	if err := initRound(run.dir, k+1, prompt, fingerprint); err != nil {
+	if err := initRound(run.dir, k+1, prompt, sc.fingerprint, sc.mergeBase); err != nil {
 		return e.errorf("%v", err)
 	}
 	if companion == "" {
@@ -608,13 +627,18 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 }
 
 type freshResult struct {
-	Fresh bool `json:"fresh"`
-	Round int  `json:"round"`
+	Fresh     bool   `json:"fresh"`
+	Round     int    `json:"round"`
+	MergeBase string `json:"merge_base"`
 }
 
 // ReviewFresh implements `agk review fresh <run-dir>`: whether the current diff
-// scope still matches the fingerprint recorded for the run's current round. It
-// reads the repository and the run directory and writes nothing.
+// scope still matches the fingerprint recorded for the run's current round. The
+// scope is read against the merge base the round recorded, so a commit on the
+// base branch that keeps the reviewed tree does not move it; a round written
+// before merge bases were recorded falls back to the merge base of the run's
+// base and HEAD. It reads the repository and the run directory and writes
+// nothing.
 func (e *Env) ReviewFresh(ctx context.Context, args []string) int {
 	if len(args) != 1 {
 		return e.errorf("usage: agk review fresh <run-dir>")
@@ -630,21 +654,50 @@ func (e *Env) ReviewFresh(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	recorded, err := os.ReadFile(filepath.Join(rundir.RoundDir(run.dir, k), scopeFile))
+	rd := rundir.RoundDir(run.dir, k)
+	recorded, err := os.ReadFile(filepath.Join(rd, scopeFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return e.errorf("round %d of %s has no %s: it was written by an older agk; run a new review round", k, run.dir, scopeFile)
 		}
 		return e.errorf("%v", err)
 	}
-	scope, err := e.Collect(ctx, run.root, run.state.Base)
+	base, mergeBase := run.state.Base, ""
+	switch b, err := os.ReadFile(filepath.Join(rd, mergeBaseFile)); {
+	case err == nil:
+		mergeBase = strings.TrimSpace(string(b))
+		if mergeBase == "" {
+			return e.errorf("round %d of %s: %s is empty", k, run.dir, mergeBaseFile)
+		}
+		ancestor, err := e.IsAncestor(ctx, run.root, mergeBase)
+		if err != nil {
+			return e.errorf("round %d of %s: recorded merge base: %v", k, run.dir, err)
+		}
+		if !ancestor {
+			return e.printJSON(freshResult{Fresh: false, Round: k, MergeBase: mergeBase})
+		}
+		base = mergeBase
+	case !errors.Is(err, os.ErrNotExist):
+		return e.errorf("%v", err)
+	}
+	scope, err := e.Collect(ctx, run.root, base)
 	switch {
 	case errors.Is(err, review.ErrNothingToReview):
-		return e.printJSON(freshResult{Fresh: false, Round: k})
+		return e.printJSON(freshResult{Fresh: false, Round: k, MergeBase: firstNonEmpty(mergeBase, scope.MergeBase)})
 	case err != nil:
 		return e.errorf("%v", err)
 	}
-	return e.printJSON(freshResult{Fresh: scope.Fingerprint == strings.TrimSpace(string(recorded)), Round: k})
+	return e.printJSON(freshResult{
+		Fresh: scope.Fingerprint == strings.TrimSpace(string(recorded)), Round: k,
+		MergeBase: firstNonEmpty(mergeBase, scope.MergeBase),
+	})
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // ReviewClose implements `agk review close <run-dir>`.

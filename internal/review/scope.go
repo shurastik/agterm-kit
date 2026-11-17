@@ -82,6 +82,8 @@ type Scope struct {
 }
 
 // Collect gathers the review scope of the repo containing dir against base.
+// An empty scope is ErrNothingToReview, returned with the scope's Root, Base
+// and MergeBase set and nothing else.
 func Collect(ctx context.Context, dir, base string) (Scope, error) {
 	root, err := gitOut(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -118,7 +120,8 @@ func Collect(ctx context.Context, dir, base string) (Scope, error) {
 		return Scope{}, err
 	}
 	if s.Diff == "" && len(s.Untracked) == 0 {
-		return Scope{}, ErrNothingToReview
+		// The merge base is still worth reporting: `agk review fresh` prints it.
+		return Scope{Root: s.Root, Base: s.Base, MergeBase: s.MergeBase}, ErrNothingToReview
 	}
 	return s, nil
 }
@@ -171,6 +174,29 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
 	}
 	return out.String(), nil
+}
+
+// IsAncestor reports whether commit is an ancestor of HEAD (HEAD itself
+// included) in the repository holding dir. A commit the repository does not
+// have is an error naming it; history that merely does not contain it, an
+// unrelated one included, is false with no error.
+func IsAncestor(ctx context.Context, dir, commit string) (bool, error) {
+	if _, err := gitOut(ctx, dir, "cat-file", "-e", commit+"^{commit}"); err != nil {
+		return false, fmt.Errorf("commit %s is not in the repository: %w", commit, err)
+	}
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit, "HEAD")
+	cmd.Dir = dir
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s HEAD: %v: %s", commit, err, strings.TrimSpace(errb.String()))
 }
 
 // RepoRoot returns the top-level directory of the git repository holding dir.

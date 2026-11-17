@@ -70,9 +70,13 @@ agk review wait <dir> [--timeout SECONDS]    # {"status":"completed|blocked|need
 agk review send <dir> [--note FILE] [--timeout SECONDS]
                                              # re-review round, typed into the same reviewer session once its turn
                                              # is over (default 600 s)
-agk review fresh <dir>                       # {"fresh":true|false,"round":K}: read-only; does the current diff scope
-                                             # still match the current round's fingerprint (rounds/<k>/scope.sha256)?
-                                             # a plan run, a round without a fingerprint or a bad dir exits 1
+agk review fresh <dir>                       # {"fresh":true|false,"round":K,"merge_base":"<sha>"}: read-only; does the
+                                             # current diff scope, read against the round's recorded merge base
+                                             # (rounds/<k>/merge-base), still match its fingerprint (rounds/<k>/scope.sha256)?
+                                             # a commit on the base branch keeps it fresh, an edit or a rebase does not;
+                                             # a recorded merge base no longer an ancestor of HEAD is stale; a round without
+                                             # merge-base uses merge-base(run base, HEAD); a plan run, a round without a
+                                             # fingerprint, a merge base missing from the repo or a bad dir exits 1
 agk review close <dir>
 agk sync <change> [--no-pull]                # worktree mode: pull the base --ff-only (skipped without upstream or
                                              # --no-pull), rebase branch <change> onto it in .worktrees/<change>;
@@ -117,7 +121,7 @@ pass, and stops before `agk apply`) and `skills/agk-archive/SKILL.md` (the close
 | `evals/` | Eval suite of the three workflow skills (`agk-propose`, `agk-explore`, `agk-archive`) for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
-`rounds/<k>/` per round (gitignored here; a diff review round also holds `scope.sha256`). An interactive review run also holds `schema.json`, the
+`rounds/<k>/` per round (gitignored here; a diff review round also holds `scope.sha256` and `merge-base`). An interactive review run also holds `schema.json`, the
 reviewer's only writable directory `out/` (it writes `out/<k>.json`) and, for claude,
 `reviewer-settings.json`.
 

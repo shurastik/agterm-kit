@@ -53,6 +53,8 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `changed-during-review` | `agk-archive` | Code changed during the fallback review |
 | `fallback-findings` | `agk-archive` | Fallback review has findings |
 | `nothing-to-review` | `agk-archive` | Nothing to review |
+| `merge-base-retry` | `agk-archive` | Nothing to review against the base, retried at the recorded merge base |
+| `merge-base-retry-empty` | `agk-archive` | Retry at the merge base also has nothing to review |
 | `changed-during-verify` | `agk-archive` | Code changed during verify |
 | `verify-critical` | `agk-archive` | Verify reports CRITICAL (also the broken-skill check) |
 | `verify-warnings` | `agk-archive` | Verify reports warnings only |
@@ -100,9 +102,14 @@ review) and then to run the `agk-archive` skill.
 - The `openspec-propose` stub runs `.eval/write-change.sh` and stops like the real skill; the
   `revdiff` stub tells the agent to run `revdiff` in the foreground and read its stdout as annotations.
 - Diff reviews (`agk review start --base`) create a run dir with a `base` file; `start` and `send`
-  store a fingerprint of the workspace per round (`git diff <base>` plus each untracked path and
-  content) and `review fresh` recomputes it. `start` answers `nothing to review` (exit 1) with no diff
-  and no untracked file. With the `edit-during-review` marker, `review wait` appends a line to
+  store per round the merge base of the base and `HEAD` (`rounds/<k>/merge-base`) and a fingerprint
+  of the workspace (each path between the merge base and the working tree with its content, so a
+  commit that keeps the content keeps the fingerprint). `review fresh` recomputes it against the
+  recorded merge base, answers `false` when that commit is no longer an ancestor of `HEAD`, exits 1
+  when it is missing, and prints `merge_base`; a round without the file falls back to the run's base.
+  `start` answers `nothing to review` (exit 1) with no diff and no untracked file, and, with the
+  `retry-nothing-to-review` marker, also for a `--base` that is a 40-hex commit id (the retry at a merge
+  base). With the `edit-during-review` marker, `review wait` appends a line to
   `widget.go` before it returns. `apply close` and `review close` log their run dir. Inside the
   agent's sandbox Apple's `/usr/bin/git` shim fails (xcrun cannot write its cache), so the stand-in
   falls back to the real binary under `/Library/Developer/CommandLineTools`.

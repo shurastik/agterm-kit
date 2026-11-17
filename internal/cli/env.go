@@ -33,8 +33,11 @@ type Env struct {
 	Ctl            agterm.Ctl
 	Driver         func(name string) (harness.Driver, error)
 	Collect        func(ctx context.Context, dir, base string) (review.Scope, error)
-	CollectPlan    func(ctx context.Context, dir, change string) (review.PlanScope, error)
-	RepoRoot       func(ctx context.Context, dir string) (string, error)
+	// IsAncestor reports whether a commit is an ancestor of HEAD in the repository
+	// holding dir; a commit the repository lacks is an error.
+	IsAncestor  func(ctx context.Context, dir, commit string) (bool, error)
+	CollectPlan func(ctx context.Context, dir, change string) (review.PlanScope, error)
+	RepoRoot    func(ctx context.Context, dir string) (string, error)
 	// ApplyState reports an OpenSpec change's apply state (ready, blocked,
 	// all_done) and the CLI's message.
 	ApplyState func(ctx context.Context, root, change string) (state, message string, err error)
@@ -72,6 +75,7 @@ func NewEnv() (*Env, error) {
 			return harness.New(name, harness.DefaultRuntime())
 		},
 		Collect:      review.Collect,
+		IsAncestor:   review.IsAncestor,
 		CollectPlan:  review.CollectPlan,
 		RepoRoot:     review.RepoRoot,
 		ApplyState:   apply.OpenSpecState,

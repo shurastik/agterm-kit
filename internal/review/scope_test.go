@@ -98,9 +98,12 @@ func TestCollectExcludesIgnoredAndAgkDir(t *testing.T) {
 func TestCollectNothingToReview(t *testing.T) {
 	dir := gitRepo(t)
 	write(t, dir, ".agk/reviews/1/prompt.md", "old\n")
-	_, err := Collect(context.Background(), dir, "main")
+	s, err := Collect(context.Background(), dir, "main")
 	if !errors.Is(err, ErrNothingToReview) || err.Error() != "nothing to review" {
 		t.Fatalf("err = %v", err)
+	}
+	if want := strings.TrimSpace(git(t, dir, "rev-parse", "HEAD")); s.MergeBase != want || s.Root != dir {
+		t.Fatalf("partial scope = %+v, want root %q and merge base %q", s, dir, want)
 	}
 }
 
@@ -476,4 +479,118 @@ func TestReadRestCommandFromSubdirReproducesRepoDiff(t *testing.T) {
 	if got := run(ReadRestCommand(s.MergeBase, "")); got == s.Diff {
 		t.Fatal("without -C the pathspec is relative to out/: the control case must differ")
 	}
+}
+
+func TestCollectMergeBaseSurvivesCommitOnBase(t *testing.T) {
+	dir := gitRepo(t)
+	write(t, dir, "widget.go", "package a\n\nfunc Widget() {}\n")
+	write(t, dir, "a.go", "package a\n\nfunc Edited() {}\n")
+
+	before, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "work on main")
+
+	// The commit moves merge-base(main, HEAD) onto itself: the scope is empty.
+	if _, err := Collect(context.Background(), dir, "main"); !errors.Is(err, ErrNothingToReview) {
+		t.Fatalf("Collect against main after the commit: err = %v, want nothing to review", err)
+	}
+	after, err := Collect(context.Background(), dir, before.MergeBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.MergeBase != before.MergeBase {
+		t.Fatalf("merge base = %q, want the recorded %q", after.MergeBase, before.MergeBase)
+	}
+	if after.Fingerprint != before.Fingerprint {
+		t.Fatalf("fingerprint after the commit = %q, want %q", after.Fingerprint, before.Fingerprint)
+	}
+}
+
+func TestCollectMergeBaseRebasedOntoMovedBase(t *testing.T) {
+	dir := gitRepo(t)
+	git(t, dir, "checkout", "-qb", "feat")
+	write(t, dir, "feat.go", "package a\n\nfunc Feat() {}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "feat")
+
+	before, err := Collect(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	git(t, dir, "checkout", "-q", "main")
+	write(t, dir, "other.go", "package a\n\nfunc Other() {}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "other")
+	git(t, dir, "checkout", "-q", "feat")
+	git(t, dir, "rebase", "-q", "main")
+
+	after, err := Collect(context.Background(), dir, before.MergeBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.MergeBase != before.MergeBase {
+		t.Fatalf("merge base = %q, want the recorded %q", after.MergeBase, before.MergeBase)
+	}
+	if after.Fingerprint == before.Fingerprint {
+		t.Fatal("fingerprint unchanged after a rebase onto a moved base, want a different one")
+	}
+}
+
+func TestIsAncestor(t *testing.T) {
+	ctx := context.Background()
+	dir := gitRepo(t)
+	first := strings.TrimSpace(git(t, dir, "rev-parse", "HEAD"))
+	write(t, dir, "b.go", "package a\n\nfunc B() {}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "b")
+	second := strings.TrimSpace(git(t, dir, "rev-parse", "HEAD"))
+
+	t.Run("ancestor of HEAD", func(t *testing.T) {
+		ok, err := IsAncestor(ctx, dir, first)
+		if err != nil || !ok {
+			t.Fatalf("IsAncestor(first) = %v, %v; want true", ok, err)
+		}
+	})
+	t.Run("HEAD itself", func(t *testing.T) {
+		ok, err := IsAncestor(ctx, dir, second)
+		if err != nil || !ok {
+			t.Fatalf("IsAncestor(HEAD) = %v, %v; want true", ok, err)
+		}
+	})
+	t.Run("diverged history", func(t *testing.T) {
+		git(t, dir, "checkout", "-q", "-b", "other", first)
+		write(t, dir, "c.go", "package a\n\nfunc C() {}\n")
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-qm", "c")
+		ok, err := IsAncestor(ctx, dir, second)
+		if err != nil || ok {
+			t.Fatalf("IsAncestor(second) on a diverged branch = %v, %v; want false, nil", ok, err)
+		}
+		git(t, dir, "checkout", "-q", "main")
+	})
+	t.Run("unrelated orphan branch", func(t *testing.T) {
+		git(t, dir, "checkout", "-q", "--orphan", "orphan")
+		write(t, dir, "o.go", "package o\n")
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-qm", "orphan")
+		ok, err := IsAncestor(ctx, dir, second)
+		if err != nil || ok {
+			t.Fatalf("IsAncestor(second) on an orphan branch = %v, %v; want false, nil", ok, err)
+		}
+		git(t, dir, "checkout", "-q", "main")
+	})
+	t.Run("missing commit", func(t *testing.T) {
+		missing := strings.Repeat("a", 40)
+		ok, err := IsAncestor(ctx, dir, missing)
+		if err == nil || ok {
+			t.Fatalf("IsAncestor(missing) = %v, %v; want an error", ok, err)
+		}
+		if !strings.Contains(err.Error(), missing) {
+			t.Fatalf("error %q does not name the commit", err)
+		}
+	})
 }

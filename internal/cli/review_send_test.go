@@ -41,6 +41,39 @@ func runSend(h *tenv, args ...string) int {
 	return h.env.Main(context.Background(), append([]string{"review", "send"}, args...))
 }
 
+func TestReviewSendRecordsMergeBasePerRound(t *testing.T) {
+	h := newHarness(t, true)
+	root, dir := sendDir(t, h, "", true)
+	if err := os.WriteFile(mergeBaseFilePath(dir, 1), []byte("M1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.env.Collect = func(_ context.Context, _, base string) (review.Scope, error) {
+		return review.Scope{Root: root, Base: base, MergeBase: "M2", Diff: "+x\n", Stat: " f | 1 +\n", Fingerprint: scopeFingerprint}, nil
+	}
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	for k, want := range map[int]string{1: "M1\n", 2: "M2\n"} {
+		got, err := os.ReadFile(mergeBaseFilePath(dir, k))
+		if err != nil || string(got) != want {
+			t.Errorf("round %d merge-base = %q, %v; want %q", k, got, err, want)
+		}
+	}
+}
+
+func TestReviewSendPlanRoundHasNoMergeBase(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir, _ := planSendDir(t, h, "T-1", true, "TASKS\n")
+	h.ctl.WaitStatus = "active"
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if exists(mergeBaseFilePath(dir, 2)) {
+		t.Fatal("a plan round must not record a merge base")
+	}
+}
+
 func TestReviewSendSecondRound(t *testing.T) {
 	h := newHarness(t, true)
 	root, dir := sendDir(t, h, "", true)
@@ -617,7 +650,7 @@ func TestForRunIsADiffReviewInSendWaitFreshClose(t *testing.T) {
 			if code := runFresh(h, dir); code != 0 {
 				t.Fatalf("fresh: exit %d: %s", code, h.err)
 			}
-			if want := `{"fresh":true,"round":1}` + "\n"; h.out.String() != want {
+			if want := `{"fresh":true,"round":1,"merge_base":"mb"}` + "\n"; h.out.String() != want {
 				t.Fatalf("fresh stdout = %q, want %q", h.out, want)
 			}
 			if !reflect.DeepEqual(*seen, []string{root, base}) {

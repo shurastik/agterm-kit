@@ -4,7 +4,8 @@
 # .eval/outcomes/<case>/round-<k>.json, staged into the workspace by the
 # scaffold from evals/_fixtures/outcomes/ (approve when absent). Plan reviews
 # (--change) and diff reviews (--base) are both played; a diff run records the
-# fingerprint of the workspace per round, which `review fresh` compares.
+# fingerprint of the workspace per round and the merge base the scope was built
+# from (rounds/<k>/merge-base), which `review fresh` compares against.
 # `sync` and `finish` play the worktree commands on the workspace repository
 # standing on the change's branch (see scaffold-archive.sh --worktree).
 set -uo pipefail
@@ -44,14 +45,21 @@ any_dir() { # a run dir of any kind, for close: it holds a base, a change or a w
   (cd "$d" && pwd -P)
 }
 untracked() { (cd "$root" && git ls-files --others --exclude-standard -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log'); }
-fingerprint() { # base -> hash of the workspace state: git diff <base> plus each untracked path and content
+fingerprint() { # merge base -> hash of the workspace state: each path between it and the working tree with its content
   (
     cd "$root" || exit 1
-    git diff --no-color "$1" -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log'
-    untracked | while IFS= read -r f; do printf 'untracked %s\n' "$f"; cat "$f"; done
+    # Like the real fingerprint, the hash does not tell committed, staged and
+    # untracked apart: a commit that keeps the content keeps it.
+    { git diff --no-color --name-only "$1" -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log'; untracked; } | sort -u | while IFS= read -r f; do
+      printf 'path %s\n' "$f"
+      if [ -f "$f" ]; then cat "$f"; else echo '<deleted>'; fi
+    done
     # A rebasing `sync` moves the merge base, which the real fingerprint hashes.
     printf 'rebasing syncs: %s\n' "$(cat "$root/.agk/rebases" 2>/dev/null || echo 0)"
   ) | shasum | awk '{print $1}'
+}
+merge_base() { # base -> the commit id the scope of a diff round is built from
+  git -C "$root" merge-base "$1" HEAD
 }
 nothing_to_review() { # base -> true when there is no diff against base and no untracked file
   [ -z "$(cd "$root" && git diff --no-color "$1" -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log')" ] && [ -z "$(untracked)" ]
@@ -83,6 +91,10 @@ case "$cmd $sub" in
     base="${base:-main}"
     git -C "$root" rev-parse --verify --quiet "$base^{commit}" >/dev/null || die "merge base of \"$base\" and HEAD: unknown ref"
     nothing_to_review "$base" && die "nothing to review"
+    # The case's marker plays a base that holds nothing to review either: a
+    # retry at a commit id (not a branch name) finds an empty scope, too.
+    if [ -f "$outcomes/retry-nothing-to-review" ] && [[ "$base" =~ ^[0-9a-f]{40}$ ]]; then die "nothing to review"; fi
+    mb="$(merge_base "$base")" || die "merge base of \"$base\" and HEAD: no common ancestor"
     n=1; while [ -e "$root/.agk/reviews/$n" ]; do n=$((n + 1)); done
     dir="$root/.agk/reviews/$n"
     mkdir -p "$dir/rounds/1"
@@ -92,7 +104,8 @@ case "$cmd $sub" in
     else
       printf '{"worker":{"harness":"codex"},"base":"%s","interactive":true}\n' "$base" > "$dir/worker.json"
     fi
-    fingerprint "$base" > "$dir/rounds/1/fingerprint"
+    fingerprint "$mb" > "$dir/rounds/1/fingerprint"
+    echo "$mb" > "$dir/rounds/1/merge-base"
     printf '{"companion":"%s","dir":"%s","started":true}\n' "$companion" "$dir"
     exit 0
   fi
@@ -143,12 +156,14 @@ case "$cmd $sub" in
   if [ -f "$dir/base" ]; then # a diff run: nothing to check beyond the scope
     base="$(cat "$dir/base")"
     nothing_to_review "$base" && die "nothing to review"
+    mb="$(merge_base "$base")" || die "merge base of \"$base\" and HEAD: no common ancestor"
     next=$((k + 1)); mkdir -p "$dir/rounds/$next"
     if [ -n "$notefile" ]; then
       cp "$notefile" "$dir/rounds/$next/note.md"
       while IFS= read -r line || [ -n "$line" ]; do note "note: $line"; done < "$notefile"
     fi
-    fingerprint "$base" > "$dir/rounds/$next/fingerprint"
+    fingerprint "$mb" > "$dir/rounds/$next/fingerprint"
+    echo "$mb" > "$dir/rounds/$next/merge-base"
     echo "$next" > "$dir/round"
     printf '{"companion":"%s","dir":"%s","round":%s}\n' "$companion" "$dir" "$next"
     exit 0
@@ -173,9 +188,20 @@ case "$cmd $sub" in
   [ -f "$dir/rounds/$k/fingerprint" ] || die "round $k of $dir has no scope fingerprint: it was written by an older agk"
   base="$(cat "$dir/base")"
   fresh=false
-  if ! nothing_to_review "$base" && [ "$(fingerprint "$base")" = "$(cat "$dir/rounds/$k/fingerprint")" ]; then fresh=true; fi
+  if [ -f "$dir/rounds/$k/merge-base" ]; then
+    # Compare against the round's recorded merge base, as the real agk does.
+    mb="$(tr -d '[:space:]' < "$dir/rounds/$k/merge-base")"
+    [ -n "$mb" ] || die "round $k of $dir: merge-base is empty"
+    git -C "$root" cat-file -e "$mb^{commit}" 2>/dev/null || die "round $k of $dir: recorded merge base $mb: commit $mb is not in the repository"
+    scope="$mb"
+    if ! git -C "$root" merge-base --is-ancestor "$mb" HEAD; then scope=""; fi
+  else
+    mb="$(merge_base "$base" 2>/dev/null || true)"
+    scope="$base"
+  fi
+  if [ -n "$scope" ] && ! nothing_to_review "$scope" && [ "$(fingerprint "$scope")" = "$(cat "$dir/rounds/$k/fingerprint")" ]; then fresh=true; fi
   note "fresh: $fresh"
-  printf '{"fresh":%s,"round":%s}\n' "$fresh" "$k"
+  printf '{"fresh":%s,"round":%s,"merge_base":"%s"}\n' "$fresh" "$k" "$mb"
   ;;
 "review close")
   dir="$(any_dir "${3:-}")" || exit 1

@@ -199,9 +199,14 @@ The sidebar names of the companions carry the change, so several changes in flig
 `<harness>-review #N` for one without. agk names only the companions it creates; your own session
 keeps its name.
 
-`agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K}`, whether
-the current diff still matches what the run's current round reviewed (committing does not change
-it, an edit does; a plan review or a round from an older agk exits 1). When the loop is over:
+`agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K,"merge_base":"<sha>"}`,
+whether the current diff still matches what the run's current round reviewed. Each diff round records
+the merge base it was built from, and `fresh` compares against that one, so committing the reviewed
+work, on the base branch too, keeps the round fresh, while an edit, a rebase onto a moved base or
+history that no longer contains the recorded merge base makes it stale. A round from an older agk
+without a recorded merge base is compared against the merge base of the run's base and `HEAD`. A plan
+review, a round without a fingerprint or a recorded merge base missing from the repository exits 1.
+When the loop is over:
 
 ```bash
 agk apply close <apply run dir>

@@ -131,6 +131,9 @@ func newHarness(t *testing.T, inAgterm bool) *tenv {
 		Collect: func(context.Context, string, string) (review.Scope, error) {
 			return review.Scope{}, errors.New("collect not scripted")
 		},
+		IsAncestor: func(context.Context, string, string) (bool, error) {
+			return false, errors.New("ancestry not scripted")
+		},
 		CollectPlan: func(context.Context, string, string) (review.PlanScope, error) {
 			return review.PlanScope{}, errors.New("collect plan not scripted")
 		},

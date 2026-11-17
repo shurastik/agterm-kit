@@ -110,6 +110,11 @@ stage() { # dir [scaffold-archive options...]: a workspace with the stand-ins fi
   (cd "$d" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-common.sh" && PATH="$f2/bin:$PATH" bash "$f2/scaffold-archive.sh" "$@") || fail "scaffold-archive $*"
 }
 a() { PATH="$f2/bin:$PATH" EVAL_AGK_CASE="${CASE:-selftest-diff}" "$@"; }
+# freshline DIR: "<fresh> <round>" of `agk review fresh`, after checking that the
+# output carries a merge_base commit id.
+freshline() {
+  a agk review fresh "$1" | python3 -c 'import json,re,sys; r=json.load(sys.stdin); assert set(r)=={"fresh","round","merge_base"}, r; assert re.fullmatch("[0-9a-f]{40}", r["merge_base"]), r; print(str(r["fresh"]).lower(), r["round"])'
+}
 stage "$ws/c" --change --code --run applies:1:add-widget --run reviews:2:add-widget --run applies:3:other-change
 cd "$ws/c"
 for f in verify.sh archive.sh write-change.sh; do [ -x .eval/$f ] || fail "scaffold did not stage $f"; done
@@ -147,19 +152,20 @@ if a agk review start --change add-widget --for add-widget 2>/dev/null; then fai
 # wait plays the approve; fresh follows the workspace.
 w="$(a agk review wait "$d1")"
 printf '%s' "$w" | grep -q '"verdict":"approve"' || fail "diff wait: $w"
-[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true right after the round"
+[ "$(freshline "$d1")" = "true 1" ] || fail "fresh should be true right after the round"
 echo "package widget" > extra.go
-[ "$(a agk review fresh "$d1")" = '{"fresh":false,"round":1}' ] || fail "fresh should turn false after a new file"
+[ "$(freshline "$d1")" = "false 1" ] || fail "fresh should turn false after a new file"
 rm extra.go
-[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true again once the file is gone"
+[ "$(freshline "$d1")" = "true 1" ] || fail "fresh should be true again once the file is gone"
 
 # send works on a diff run (no change dir), records a new fingerprint.
 echo "note for round 2" > note2.md
 s="$(a agk review send "$d1" --note note2.md)" || fail "send on a diff run"
 printf '%s' "$s" | grep -q '"round":2' || fail "diff send: $s"
 [ -s "$d1/rounds/2/fingerprint" ] || fail "send: no fingerprint for round 2"
+[ "$(cat "$d1/rounds/2/merge-base")" = "$(cat "$d1/rounds/1/merge-base")" ] || fail "send: round 2 did not record the merge base"
 if a agk review send "$d1" 2>/dev/null; then fail "send while round 2 still runs"; fi
-[ "$(a agk review fresh "$d1")" = '{"fresh":true,"round":2}' ] || fail "fresh should follow the current round"
+[ "$(freshline "$d1")" = "true 2" ] || fail "fresh should follow the current round"
 
 # fresh refuses a plan run and a bad dir; edit-during-review changes the code file.
 po="$(a agk review start --change add-widget)"
@@ -173,7 +179,7 @@ o3="$(a agk review start --base main)"
 d3="$(printf '%s' "$o3" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
 a agk review wait "$d3" >/dev/null
 tail -1 widget.go | grep -q 'edited while the reviewer ran' || fail "edit-during-review did not touch widget.go"
-[ "$(a agk review fresh "$d3")" = '{"fresh":false,"round":1}' ] || fail "fresh should be false after edit-during-review"
+[ "$(freshline "$d3")" = "false 1" ] || fail "fresh should be false after edit-during-review"
 CASE=selftest-diff
 
 # close logs the run dir, for diff, plan and pre-created runs.
@@ -200,10 +206,10 @@ rm .eval/outcomes/selftest-diff/verify.txt
 mkdir -p .eval/outcomes/selftest-verify-edit && touch .eval/outcomes/selftest-verify-edit/edit-during-verify
 o4="$(a agk review start --base main)"
 d4="$(printf '%s' "$o4" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
-[ "$(a agk review fresh "$d4")" = '{"fresh":true,"round":1}' ] || fail "fresh should be true before verify edits"
+[ "$(freshline "$d4")" = "true 1" ] || fail "fresh should be true before verify edits"
 CASE=selftest-verify-edit a bash .eval/verify.sh add-widget >/dev/null
 tail -1 widget.go | grep -q 'edited while verify ran' || fail "edit-during-verify did not touch widget.go"
-[ "$(a agk review fresh "$d4")" = '{"fresh":false,"round":1}' ] || fail "fresh should be false after edit-during-verify"
+[ "$(freshline "$d4")" = "false 1" ] || fail "fresh should be false after edit-during-verify"
 if a bash .eval/verify.sh 2>/dev/null; then fail "verify.sh without a change"; fi
 touch .eval/outcomes/selftest-diff/archive-fail
 if a bash .eval/archive.sh add-widget 2>/dev/null; then fail "archive.sh should fail with archive-fail"; fi
@@ -216,6 +222,42 @@ for pat in '^verify add-widget$' '^archive add-widget$' '^agk review fresh .*rev
   printf '%s\n' "$cl" | grep -qE "$pat" || fail "agk-calls.log lacks /$pat/:
 $cl"
 done
+# A diff round records its merge base, and fresh compares against it: committing
+# the reviewed work on main keeps the round fresh, an edit or unrelated history does not.
+cd "$ws"
+stage "$ws/mb" --change --code
+cd "$ws/mb"
+omb="$(a agk review start --base main)"
+dmb="$(printf '%s' "$omb" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
+m0="$(git rev-parse HEAD)"
+[ "$(cat "$dmb/rounds/1/merge-base")" = "$m0" ] || fail "start --base: rounds/1/merge-base is not the merge base $m0"
+[ "$(a agk review fresh "$dmb" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_base"])')" = "$m0" ] || fail "fresh does not print the recorded merge base"
+git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c core.hooksPath=/dev/null add widget.go
+git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm "widget on main"
+[ "$(freshline "$dmb")" = "true 1" ] || fail "fresh should stay true after committing the reviewed file on main"
+if a agk review start --base main 2>/dev/null; then fail "start --base main after the commit should find nothing to review"; fi
+echo "// edited" >> widget.go
+[ "$(freshline "$dmb")" = "false 1" ] || fail "fresh should be false after an edit"
+git checkout -q -- widget.go
+[ "$(freshline "$dmb")" = "true 1" ] || fail "fresh should be true again after the edit is reverted"
+git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c core.hooksPath=/dev/null checkout -q --orphan unrelated
+git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm "unrelated" >/dev/null
+[ "$(freshline "$dmb")" = "false 1" ] || fail "fresh should be false once the recorded merge base is no longer an ancestor of HEAD"
+# a missing recorded merge base is an error; an old round without the file falls back to the base
+echo "0000000000000000000000000000000000000000" > "$dmb/rounds/1/merge-base"
+if a agk review fresh "$dmb" 2>"$ws/mb.err"; then fail "fresh accepted a missing merge base"; fi
+grep -q 'is not in the repository' "$ws/mb.err" || fail "missing merge base message: $(cat "$ws/mb.err")"
+rm "$dmb/rounds/1/merge-base"
+a agk review fresh "$dmb" | grep -q '"merge_base":"' || fail "fresh without a merge-base file must still print merge_base"
+# the retry-nothing-to-review marker: a retry at a commit id finds nothing too
+git checkout -q main
+mkdir -p .eval/outcomes/selftest-retry && touch .eval/outcomes/selftest-retry/retry-nothing-to-review
+echo "// again" >> widget.go
+CASE=selftest-retry a agk review start --base main >/dev/null || fail "start --base main with the retry marker"
+if CASE=selftest-retry a agk review start --base "$(git rev-parse HEAD)" 2>/dev/null; then fail "retry-nothing-to-review: a start at a commit id should find nothing to review"; fi
+git checkout -q -- widget.go
+cd "$ws"
+
 # --- Worktree stand-ins: scaffold --worktree/--branch, agk sync, agk finish ---
 cd "$ws"
 # the git stand-in runs the real binary, and never itself
@@ -254,12 +296,12 @@ mkdir -p .eval/outcomes/selftest-rebase && touch .eval/outcomes/selftest-rebase/
 : > agk-calls.log # the stand-in numbers the sync calls by their lines in the log
 o5="$(a agk review start --base main)"
 d5="$(printf '%s' "$o5" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')"
-[ "$(a agk review fresh "$d5")" = '{"fresh":true,"round":1}' ] || fail "fresh before a rebasing sync"
+[ "$(freshline "$d5")" = "true 1" ] || fail "fresh before a rebasing sync"
 rb() { CASE=selftest-rebase a agk sync add-widget; }
 printf '%s' "$(rb)" | grep -q '"rebased":false' || fail "sync-rebased-2: the first call must not rebase"
-[ "$(a agk review fresh "$d5")" = '{"fresh":true,"round":1}' ] || fail "fresh after a non-rebasing sync"
+[ "$(freshline "$d5")" = "true 1" ] || fail "fresh after a non-rebasing sync"
 printf '%s' "$(rb)" | grep -q '"rebased":true' || fail "sync-rebased-2: the second call must rebase"
-[ "$(a agk review fresh "$d5")" = '{"fresh":false,"round":1}' ] || fail "fresh should turn false after a rebasing sync"
+[ "$(freshline "$d5")" = "false 1" ] || fail "fresh should turn false after a rebasing sync"
 printf '%s' "$(rb)" | grep -q '"rebased":false' || fail "sync-rebased-2: only the second call rebases"
 mkdir -p .eval/outcomes/selftest-conflict && touch .eval/outcomes/selftest-conflict/sync-conflict
 if CASE=selftest-conflict a agk sync add-widget 2>"$ws/w.err"; then fail "sync-conflict should exit 1"; fi

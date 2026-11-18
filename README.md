@@ -59,6 +59,9 @@ The loop, with the agent skills driving it:
    archive and runs `agk finish`; in the main checkout it never commits. Without the skill,
    `agk apply close` and `agk review close` end the workers.
 
+`/agk-autopilot <idea>` runs steps 1 to 4 and the verify step unattended; see
+[Autopilot](#autopilot).
+
 Every round is a directory under `.agk/` in the repository (gitignored once `agk setup` has added
 `.agk/` to your global git ignore), so the state survives a restart of any of the sessions.
 
@@ -124,8 +127,8 @@ Put `.bin/agk` on your `PATH` (or call it by path) so the skills find it.
 
 `agk setup` does not prepare your projects. In the repository you want to work on, set up OpenSpec
 first, so the project gets its `openspec-propose`, `openspec-explore`, `openspec-verify-change` and
-`openspec-archive-change` skills (`/agk-propose`, `/agk-explore` and `/agk-archive` stop without
-doing anything when theirs is missing):
+`openspec-archive-change` skills (`/agk-propose`, `/agk-explore`, `/agk-autopilot` and `/agk-archive`
+stop without doing anything when theirs is missing):
 
 ```bash
 openspec init --tools claude    # a repository without openspec/; --tools codex for Codex
@@ -145,6 +148,14 @@ annotate what you want changed and quit. When you are happy with the plan, ask f
 ("implement the change with the applier") and, once it reports, for a review of the diff
 ("review the diff"). The `agk-apply` and `agk-review` skills run the loops below for you, send the
 review findings to the applier and re-review until the review approves.
+
+For a well-understood idea you can leave the whole run to the agent instead:
+
+```
+/agk-autopilot add a --json flag to the export command
+```
+
+See [Autopilot](#autopilot) for what it decides on your behalf and where it stops.
 
 ### With the CLI
 
@@ -217,6 +228,56 @@ agk review close <review run dir>
 timeouts (`--timeout SECONDS`) default to 3600 s for `apply wait`, 600 s for `apply send` and
 `review send` (how long they wait for the worker's turn to end before typing the next round) and
 1800 s for `review wait`. Exit codes: 0 ok, 1 error.
+
+## Autopilot
+
+`/agk-autopilot <idea>` runs the workflow unattended, from the idea to a verified change, in one
+session of your main agent (Claude Code or Codex). It follows the other skills' loops
+(`agk-propose` steps 0 to 2, `agk-apply`, `agk-review` and the project's `openspec-verify-change`)
+and replaces every point where they would ask you:
+
+1. It writes the change with the project's `openspec-propose` workflow, without asking you anything.
+2. The reviewer checks the plan (`agk review start --change`) until a round approves. There is no
+   revdiff pass.
+3. The applier implements the change (`agk apply start`).
+4. The reviewer checks the diff (`agk review start --base`); the findings the agent accepts go to
+   the applier, and the diff is re-reviewed in the same reviewer session until a round approves.
+5. `openspec-verify-change` runs until it reports 0 CRITICAL; after each approve and after each
+   verify, `agk review fresh` checks that the approved code is still the current code.
+
+It stops there, with a report in chat, and names `/agk-archive <change>` as the only next step. It
+never archives, commits, pushes or runs `agk finish`. In worktree mode (see below) the plan commit
+that `agk apply start` makes on the base branch is the only commit of the run, and the report names
+it.
+
+**Decisions.** Where the other skills would ask you (a question of `openspec-propose`, the change
+name, a review finding the agent disagrees with, a `needs-attention` verdict, an applier `blocked`
+report, a verify CRITICAL or a WARNING it rejects), the agent decides and appends an entry to
+`openspec/changes/<change>/decisions.md`, tagged `[scope]` (what users or callers of the change
+would see) or `[impl]`:
+
+```markdown
+## D1 [scope] Output format of the list
+- Open: the idea leaves the output format open (plain lines or JSON).
+- Decision: one widget name per line, sorted.
+- Why: the existing commands print plain lines.
+```
+
+The file exists from the first plan review round on, so the reviewer reads the decisions with the
+plan, and it is archived with the change. The final report lists the `[scope]` decisions first, then
+the `[impl]` ones, with the review round counts, the verify result and the worktree path when there
+is one. Read it before `/agk-archive`: the code reviewer saw the decisions, you did not.
+
+**Where it stops for you.** Only when a worker needs a human (`needs-human`: a permission or trust
+prompt or a question in a companion; the agent tells you and waits again, it never answers for
+you), when you closed a companion (`cancelled`), when an `agk` command fails, or when a review loop
+runs past its limit: at most 5 rounds in one plan reviewer and 5 in one code reviewer. A stopped run
+closes nothing, so you continue from the open companions.
+
+**Closing.** A finished run closes both reviewers and leaves the applier open, so you can still send
+it notes before `/agk-archive` closes it.
+
+Invoke it by name only; a plain request to build something never starts it.
 
 ## Worktree mode
 

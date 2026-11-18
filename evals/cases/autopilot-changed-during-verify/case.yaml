@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-changed-during-verify
+description: "Code changed during verify: agk review fresh reports false after verify, so one more code review round and verify run before the final report."
+plugins: ["../../case-plugins/autopilot-changed-during-verify"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-changed-during-verify

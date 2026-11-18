@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-blocked
+description: "Blocked on tasks: the applier's blocked report is resolved by the model: tasks.md is edited, a decision recorded, a plan review round approves the edit, and only then the note goes to the applier."
+plugins: ["../../case-plugins/autopilot-blocked"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-blocked

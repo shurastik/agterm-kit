@@ -1,0 +1,1 @@
+{"status": "blocked", "progress": "0/1", "summary": "Read the plan; wrote no code.", "problem": "Task 1.1 says `widget list` prints the sorted file names of `widgets/`, but it names no sort order: sort by file name, or by modification time. Two readings, the spec only says sorted.", "artifact": "tasks"}

@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-review-limit
+description: "Code review does not converge: round 5 still has findings, so no sixth round runs and the run stops with the open findings and the decisions so far."
+plugins: ["../../case-plugins/autopilot-review-limit"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-review-limit

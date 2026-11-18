@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-name-taken
+description: "Name already taken: the change is created under another, unused name, the existing change stays untouched and the name is recorded as a decision."
+plugins: ["../../case-plugins/autopilot-name-taken"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-name-taken

@@ -1,9 +1,18 @@
 #!/bin/bash
-# Writes the fixed change add-widget for the eval stub openspec-propose skill;
-# the scaffold stages it as .eval/write-change.sh in the case workspace.
+# Writes the fixed change (add-widget, or the name given as the one argument)
+# for the eval stub openspec-propose skill; the scaffold stages it as
+# .eval/write-change.sh in the case workspace. A given name that is already an
+# active change is refused, like `openspec new change` does; without an argument
+# the fixed change is (re)written as before.
 set -euo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-d="$root/openspec/changes/add-widget"
+name="${1:-add-widget}"
+[[ "$name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "write-change: invalid change name \"$name\": want kebab-case" >&2; exit 1; }
+if [ $# -ge 1 ] && [ -d "$root/openspec/changes/$name" ]; then
+  echo "write-change: change \"$name\" already exists; pick another name" >&2
+  exit 1
+fi
+d="$root/openspec/changes/$name"
 mkdir -p "$d/specs/widget"
 cat > "$d/.openspec.yaml" <<'X'
 schema: spec-driven

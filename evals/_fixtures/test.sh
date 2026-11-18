@@ -338,6 +338,211 @@ if (cd "$ws/x" && a agk finish add-widget) 2>/dev/null; then fail "finish accept
 [ "$(git -C "$ws/x" rev-parse --abbrev-ref HEAD)" = add-widget ] || fail "scaffold --branch is not on add-widget"
 cd "$ws"
 
+# --- Autopilot stand-ins: apply start|wait|send, plan/code outcomes, wait statuses, verify sequence ---
+stage "$ws/ap" --change
+cd "$ws/ap"
+jget() { python3 -c 'import json,sys; v=json.load(sys.stdin)[sys.argv[1]]; print("null" if v is None else str(v).lower() if isinstance(v,bool) else v)' "$1"; }
+oc() { mkdir -p ".eval/outcomes/$1"; } # outcomes dir of a case
+# apply start: the run dir, the keys of the real command, refusals
+as="$(a agk apply start add-widget)" || fail "apply start"
+printf '%s' "$as" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert set(r)=={"companion","dir","started","worktree","pulled"} and r["started"] is True and r["worktree"] is None and r["pulled"] is False, r' || fail "apply start output: $as"
+ad="$(printf '%s' "$as" | jget dir)"
+[ -d "$ad/rounds/1" ] && [ "$(cat "$ad/round")" = 1 ] && [ -s "$ad/worker.json" ] || fail "apply start: no run dir state in $ad"
+[ "$(basename "$(dirname "$ad")")" = applies ] || fail "apply start: dir $ad is not under .agk/applies"
+as2="$(a agk apply start add-widget --applier claude:opus --no-pull)" || fail "apply start with flags"
+[ "$(printf '%s' "$as2" | jget dir)" != "$ad" ] || fail "apply start: a second run got the same dir"
+if a agk apply start no-such-change 2>/dev/null; then fail "apply start accepted a missing change"; fi
+if a agk apply start Bad_Name 2>/dev/null; then fail "apply start accepted a bad name"; fi
+if a agk apply start 2>/dev/null; then fail "apply start without a change"; fi
+if a agk apply start add-widget --bogus 2>/dev/null; then fail "apply start accepted an unknown flag"; fi
+# apply wait: a default done report, the code file, replay of the same round
+[ ! -e widget.go ] || fail "widget.go exists before the first done report"
+aw="$(a agk apply wait "$ad")" || fail "apply wait"
+printf '%s' "$aw" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"]=="done" and r["round"]==1 and r["progress"]=="1/1" and r["summary"], r' || fail "apply wait default report: $aw"
+grep -q 'func List' widget.go || fail "apply wait done did not write widget.go"
+cp widget.go widget.before
+[ "$(a agk apply wait "$ad")" = "$aw" ] || fail "apply wait replay differs"
+cmp -s widget.go widget.before || fail "apply wait replay rewrote widget.go"
+[ -s "$ad/rounds/1/report.json" ] || fail "apply wait: no rounds/1/report.json"
+a agk apply wait "$ad" --timeout 5 >/dev/null || fail "apply wait --timeout"
+if a agk apply wait "$ws" 2>/dev/null; then fail "apply wait accepted a bad dir"; fi
+if a agk apply wait "$d1" 2>/dev/null; then fail "apply wait accepted a review run"; fi
+if a agk review wait "$ad" 2>/dev/null; then fail "review wait accepted an apply run"; fi
+# apply send: a note file or stdin, next round, refused while running
+printf 'Fix the first finding.\nThen rerun the gates.\n' > anote.md
+if a agk apply send "$ad" /nonexistent 2>/dev/null; then fail "apply send accepted a missing note"; fi
+if a agk apply send "$ad" 2>/dev/null; then fail "apply send without a note"; fi
+if a agk apply send "$ad" anote.md --stdin </dev/null 2>/dev/null; then fail "apply send accepted a file and --stdin"; fi
+sd="$(a agk apply send "$ad" anote.md)" || fail "apply send"
+[ "$sd" = '{"round":2,"started":true}' ] || fail "apply send output: $sd"
+[ "$(cat "$ad/round")" = 2 ] && cmp -s anote.md "$ad/rounds/2/note.md" || fail "apply send: round or note not stored"
+if a agk apply send "$ad" anote.md 2>/dev/null; then fail "apply send while round 2 still runs"; fi
+a agk apply wait "$ad" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"]=="done" and r["round"]==2, r' || fail "apply wait round 2"
+tail -1 widget.go | grep -q 'applier round 2' || fail "a later done round did not touch widget.go"
+printf 'Note from stdin.\n' | a agk apply send "$ad" --stdin | grep -q '"round":3' || fail "apply send --stdin"
+grep -qx 'Note from stdin.' "$ad/rounds/3/note.md" || fail "apply send --stdin: note not stored"
+# outcomes: a played report (round added), a status played once, no code file for blocked
+stage "$ws/ap2" --change
+cd "$ws/ap2"
+oc selftest-apply
+printf 'Fix the first finding.\n' > anote.md
+printf '{"status":"blocked","progress":"1/2","summary":"did one","problem":"two readings","artifact":"tasks"}\n' > .eval/outcomes/selftest-apply/apply-round-1.json
+printf '{"status":"needs-human","reason":"permission"}\n' > .eval/outcomes/selftest-apply/apply-wait-1.json
+printf '{"status":"done","progress":"2/2","summary":"finished"}\n' > .eval/outcomes/selftest-apply/apply-round-2.json
+CASE=selftest-apply
+ad2="$(a agk apply start add-widget | jget dir)"
+a agk apply wait "$ad2" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r=={"status":"needs-human","reason":"permission","round":1}, r' || fail "apply-wait-1.json was not played first"
+[ ! -f "$ad2/rounds/1/report.json" ] || fail "a played apply status wrote a report"
+if a agk apply send "$ad2" anote.md 2>/dev/null; then fail "apply send during needs-human"; fi
+a agk apply wait "$ad2" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"]=="blocked" and r["round"]==1 and r["artifact"]=="tasks" and r["problem"], r' || fail "apply-round-1.json was not played after the status"
+[ ! -e widget.go ] || fail "a blocked report wrote the code file"
+a agk apply send "$ad2" anote.md >/dev/null || fail "apply send after blocked"
+a agk apply wait "$ad2" | grep -q '"status":"done"' || fail "apply-round-2.json"
+[ -f widget.go ] || fail "the done report did not write widget.go"
+grep -q '^  apply round 1: needs-human$' agk-calls.log && grep -q '^  apply round 1: blocked$' agk-calls.log && grep -q '^  note: Fix the first finding\.$' agk-calls.log || fail "apply notes missing from agk-calls.log"
+# plan and code outcomes side by side, with round-<k>.json as the fallback
+oc selftest-split
+finding() { printf '{"verdict":"needs-attention","summary":"%s","findings":[{"severity":"medium","title":"%s","body":"b","file":"widget.go","line_start":1,"line_end":1,"confidence":0.9,"recommendation":"r"}],"next_steps":[]}\n' "$1" "$1"; }
+finding plan-says > .eval/outcomes/selftest-split/plan-round-1.json
+finding code-says > .eval/outcomes/selftest-split/code-round-1.json
+finding any-says > .eval/outcomes/selftest-split/round-1.json
+finding any-says-2 > .eval/outcomes/selftest-split/round-2.json
+CASE=selftest-split
+pr="$(a agk review start --change add-widget | jget dir)"
+a agk review wait "$pr" >/dev/null; grep -q 'plan-says' "$pr/rounds/1/review.json" || fail "a plan run did not read plan-round-1.json"
+cr="$(a agk review start --base main | jget dir)"
+a agk review wait "$cr" >/dev/null; grep -q 'code-says' "$cr/rounds/1/review.json" || fail "a diff run did not read code-round-1.json"
+echo "note" > rn.md
+a agk review send "$pr" --note rn.md >/dev/null; a agk review wait "$pr" >/dev/null
+grep -q 'any-says-2' "$pr/rounds/2/review.json" || fail "a plan run did not fall back to round-2.json"
+a agk review send "$cr" --note rn.md >/dev/null; a agk review wait "$cr" >/dev/null
+grep -q 'any-says-2' "$cr/rounds/2/review.json" || fail "a diff run did not fall back to round-2.json"
+oc selftest-only-plain; finding plain-says > .eval/outcomes/selftest-only-plain/round-1.json
+CASE=selftest-only-plain
+pr2="$(a agk review start --change add-widget | jget dir)"; cr2="$(a agk review start --base main | jget dir)"
+a agk review wait "$pr2" >/dev/null; a agk review wait "$cr2" >/dev/null
+grep -q 'plain-says' "$pr2/rounds/1/review.json" && grep -q 'plain-says' "$cr2/rounds/1/review.json" || fail "round-1.json no longer serves both kinds of run"
+# wait statuses: played once instead of the review, then the review
+oc selftest-wait
+printf '{"status":"cancelled","round":1}\n' > .eval/outcomes/selftest-wait/plan-wait-1.json
+printf '{"status":"needs-human","reason":"permission","round":1}\n' > .eval/outcomes/selftest-wait/code-wait-1.json
+CASE=selftest-wait
+pw="$(a agk review start --change add-widget | jget dir)"
+[ "$(a agk review wait "$pw")" = '{"status":"cancelled","round":1}' ] || fail "plan-wait-1.json was not played"
+[ ! -e "$pw/rounds/1/review.json" ] || fail "a played plan status wrote review.json"
+a agk review wait "$pw" | grep -q '"status":"completed"' || fail "the review was not played on the next plan wait"
+cw="$(a agk review start --base main | jget dir)"
+[ "$(a agk review wait "$cw")" = '{"status":"needs-human","reason":"permission","round":1}' ] || fail "code-wait-1.json was not played"
+[ ! -e "$cw/rounds/1/review.json" ] || fail "a played code status wrote review.json"
+a agk review wait "$cw" | grep -q '"status":"completed"' || fail "the review was not played on the next code wait"
+a agk review wait "$cw" | grep -q '"status":"completed"' || fail "a completed round was not replayed"
+# a status for round 1 does not hold back round 2; code-wait does not reach a plan run
+echo "note" > rn.md
+a agk review send "$pw" --note rn.md >/dev/null
+a agk review wait "$pw" | grep -q '"status":"completed"' || fail "plan round 2 played a round-1 status"
+CASE=selftest-split
+pw2="$(a agk review start --change add-widget | jget dir)"
+CASE=selftest-wait
+pw3="$(a agk review start --change add-widget | jget dir)"
+oc selftest-codeonly; printf '{"status":"cancelled"}\n' > .eval/outcomes/selftest-codeonly/code-wait-1.json
+CASE=selftest-codeonly
+pw4="$(a agk review start --change add-widget | jget dir)"
+a agk review wait "$pw4" | grep -q '"status":"completed"' || fail "code-wait-1.json reached a plan run"
+[ "$(a agk review wait "$(a agk review start --base main | jget dir)")" = '{"round":1,"status":"cancelled"}' ] || fail "a status without round did not get the round added"
+CASE=selftest-diff
+# verify sequence: verify-<n>.txt, edit-during-verify-<n>, edit-during-verify on every call
+stage "$ws/vs" --change --code
+cd "$ws/vs"
+oc selftest-vseq
+printf 'correctness: requirement "List widgets" has no implementation: FAIL (call 2)\n' > .eval/outcomes/selftest-vseq/verify-2.txt
+printf 'completeness: base result: pass\n' > .eval/outcomes/selftest-vseq/verify.txt
+touch .eval/outcomes/selftest-vseq/edit-during-verify-2
+CASE=selftest-vseq
+v1="$(a bash .eval/verify.sh add-widget)"; sum1="$(shasum < widget.go)"
+[ "$v1" = 'completeness: base result: pass' ] || fail "verify call 1 should print verify.txt: $v1"
+[ "$sum1" = "$(printf 'package widget\n\n// List prints the project widgets.\nfunc List() {}\n' | shasum)" ] || fail "edit-during-verify-2 edited on call 1"
+v2="$(a bash .eval/verify.sh add-widget)"
+printf '%s' "$v2" | grep -q 'FAIL (call 2)' || fail "verify call 2 should print verify-2.txt: $v2"
+tail -1 widget.go | grep -q 'edited while verify ran' || fail "edit-during-verify-2 did not edit on call 2"
+sum2="$(shasum < widget.go)"; edits2="$(grep -c 'edited while verify ran' widget.go)"
+v3="$(a bash .eval/verify.sh add-widget)"
+[ "$v3" = 'completeness: base result: pass' ] || fail "verify call 3 should print verify.txt again: $v3"
+[ "$(shasum < widget.go)" = "$sum2" ] || fail "edit-during-verify-2 edited again on call 3"
+oc selftest-vevery; touch .eval/outcomes/selftest-vevery/edit-during-verify
+CASE=selftest-vevery
+a bash .eval/verify.sh add-widget >/dev/null; a bash .eval/verify.sh add-widget >/dev/null
+[ "$(grep -c 'edited while verify ran' widget.go)" = "$(( edits2 + 2 ))" ] || fail "edit-during-verify did not edit on every call"
+CASE=selftest-diff
+cd "$ws"
+
+# write-change.sh takes an optional change name and refuses a taken one
+stage "$ws/wn" --change
+cd "$ws/wn"
+bash .eval/write-change.sh other-widget >/dev/null || fail "write-change.sh with a name"
+[ -f openspec/changes/other-widget/tasks.md ] || fail "write-change.sh with a name wrote no change"
+if bash .eval/write-change.sh add-widget 2>/dev/null; then fail "write-change.sh accepted a taken name"; fi
+if bash .eval/write-change.sh Bad_Name 2>/dev/null; then fail "write-change.sh accepted a bad name"; fi
+bash .eval/write-change.sh >/dev/null || fail "write-change.sh without a name must keep rewriting add-widget"
+# apply start in worktree mode (the `worktree` marker): plan commit, worktree, base, log in the main workspace
+stage "$ws/aw" --change --pending-worktree
+cd "$ws/aw"
+oc selftest-wt; touch .eval/outcomes/selftest-wt/worktree
+CASE=selftest-wt
+echo "<!-- decision -->" >> openspec/changes/add-widget/proposal.md
+aws="$(a agk apply start add-widget)" || fail "apply start with the worktree marker"
+wtp="$(printf '%s' "$aws" | jget worktree)"
+[ "$wtp" = "$(cd "$ws/aw" && pwd -P)/.eval/worktree" ] || fail "apply start worktree path: $aws"
+[ "$(git -C "$wtp" rev-parse --abbrev-ref HEAD)" = eval-worktree ] && [ "$(git config --get branch.add-widget.agkBase)" = main ] || fail "apply start: no branch or agkBase"
+[ "$(cd "$ws/wn" && a agk apply start add-widget | jget worktree)" = null ] || fail "a case without the worktree marker played worktree mode"
+git log -1 --format=%s | grep -qx 'chore(openspec): plan add-widget (agk apply start)' || fail "apply start: no plan commit on main"
+git show --stat --format= HEAD | grep -q 'proposal.md' || fail "apply start: the plan commit lacks the edited artifact"
+[ -z "$(git status --porcelain)" ] || fail "apply start left main dirty: $(git status --porcelain)"
+grep -q 'decision' "$wtp/openspec/changes/add-widget/proposal.md" || fail "the worktree lacks the committed plan"
+case "$(printf '%s' "$aws" | jget dir)" in "$wtp"/.agk/applies/1) ;; *) fail "apply start run dir not in the worktree: $aws" ;; esac
+[ -x "$wtp/.eval/verify.sh" ] || fail "apply start did not copy .eval into the worktree"
+grep -qE '^  plan commit: [0-9a-f]+ chore\(openspec\): plan add-widget' agk-calls.log || fail "plan commit not logged"
+# from the worktree: file work stays there, log and outcomes are the main workspace's
+awd="$(printf '%s' "$aws" | jget dir)"
+(cd "$wtp" && a agk apply wait "$awd" >/dev/null) || fail "apply wait in the worktree"
+[ -f "$wtp/widget.go" ] && [ ! -e widget.go ] || fail "the code file must land in the worktree"
+(cd "$wtp" && a agk review start --change add-widget >/dev/null) || fail "review start --change in the worktree"
+(cd "$wtp" && a bash .eval/verify.sh add-widget >/dev/null) || fail "verify.sh in the worktree"
+grep -q "^  cwd: .*/aw/.eval/worktree\$" agk-calls.log && grep -qx 'verify add-widget' agk-calls.log && [ ! -e "$wtp/agk-calls.log" ] || fail "worktree calls were not logged in the main workspace"
+(cd "$wtp" && a agk review start --base main >/dev/null) || fail "review start --base in the worktree"
+CASE=selftest-diff
+cd "$ws"
+
+# The no-sixth-round grader of autopilot-review-limit counts the code reviewer's sends over a
+# realistic log (waits and applier commands between the sends): four sends pass, a fifth fails,
+# plan reviewer sends do not count.
+python3 - "$fix/../cases/autopilot-review-limit/graders/no-sixth-round.md" <<'PY' || fail "no-sixth-round grader"
+import re, sys
+doc = open(sys.argv[1]).read()
+_, front, body = doc.split('---\n', 2)
+assert 'match: not_contains' in front and 'flags: m' in front, front
+pat = body.strip()
+def log(code_sends, plan_sends=0, sixth_wait=False):
+    out = ['agk review start --change add-widget', '  files: design.md tasks.md', '  cwd: /w',
+           'agk review wait /w/.agk/reviews/1', '  round 1: 1 finding(s), verdict needs-attention']
+    for k in range(plan_sends):
+        out += ['agk review send /w/.agk/reviews/1 --note /w/n.md', '  note: fixed', f'agk review wait /w/.agk/reviews/1', f'  round {k + 2}: 0 finding(s), verdict approve']
+    out += ['agk apply start add-widget', 'agk apply wait /w/.agk/applies/1', '  apply round 1: done',
+            'agk review start --base main --for add-widget', '  cwd: /w',
+            'agk review wait /w/.agk/reviews/2', '  round 1: 1 finding(s), verdict needs-attention']
+    for k in range(code_sends):
+        out += ['agk apply send /w/.agk/applies/1 /w/f.md', '  note: fix it', 'agk apply wait /w/.agk/applies/1', f'  apply round {k + 2}: done',
+                'agk review send /w/.agk/reviews/2 --note /w/n.md', '  note: fixed', 'agk review wait /w/.agk/reviews/2',
+                f'  round {k + 2}: 1 finding(s), verdict needs-attention']
+    if sixth_wait:
+        out += ['agk review wait /w/.agk/reviews/2', '  round 6: 0 finding(s), verdict approve']
+    return '\n'.join(out) + '\n'
+def found(text): return re.search(pat, text, re.M) is not None
+assert not found(log(4)), 'four code sends must pass'
+assert not found(log(4, plan_sends=2)), 'plan reviewer sends must not count'
+assert found(log(5)), 'a fifth code send must fail, even without a sixth wait'
+assert found(log(5, sixth_wait=True)), 'a fifth code send must fail'
+assert found(log(6, plan_sends=1)), 'six code sends must fail'
+PY
 cd "$ws/b"
 [ "$(manifest)" = "$before" ] || fail "the checkout's outcomes/ changed during the self-test"
 echo "ok"

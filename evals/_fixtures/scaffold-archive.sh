@@ -9,6 +9,14 @@
 #                    branch.add-widget.agkBase = main: what `agk apply start`
 #                    leaves a session in. The stand-in agk logs and works in the
 #                    workspace wherever it runs (git config eval.workspace)
+#   --pending-worktree
+#                    prepare worktree mode for the stand-in `agk apply start`
+#                    when the case holds the `worktree` marker: a linked worktree
+#                    on branch eval-worktree at .eval/worktree (hidden there, so
+#                    the agent sees no worktree or branch of the change before the
+#                    start; the agent's sandbox cannot create one itself), with
+#                    .eval copied in, branch.add-widget.agkBase = main and
+#                    eval.log pointing here
 #   --main-branch    stand on branch add-widget with the base recorded in the
 #                    workspace repository itself, which is a main checkout
 #   --branch         the same without a recorded base
@@ -44,6 +52,13 @@ while [ $# -gt 0 ]; do
       g -C "$main" worktree repair "$ws" >/dev/null 2>&1
       git -C "$main" config branch.add-widget.agkBase main
       git -C "$main" config eval.workspace "$ws"
+      shift ;;
+    --pending-worktree)
+      g worktree add -q -b eval-worktree .eval/worktree main
+      mkdir -p .eval/worktree/.eval
+      for f in .eval/*; do [ "$f" = .eval/worktree ] || cp -R "$f" .eval/worktree/.eval/; done
+      git config branch.add-widget.agkBase main
+      git config eval.log "$(pwd -P)"
       shift ;;
     --main-branch|--branch)
       g checkout -q -b add-widget

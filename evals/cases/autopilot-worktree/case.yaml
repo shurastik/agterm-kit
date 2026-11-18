@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-worktree
+description: "Worktree mode: the plan commit is the run's only commit and is named in the report, the main-checkout plan reviewer is closed after the start, the decision of a blocked applier is written inside the worktree and passes a new plan review started from there."
+plugins: ["../../case-plugins/autopilot-worktree"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-worktree

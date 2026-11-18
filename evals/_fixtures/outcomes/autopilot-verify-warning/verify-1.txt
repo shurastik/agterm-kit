@@ -1,0 +1,4 @@
+Check results for add-widget:
+- completeness: all tasks in tasks.md are done: pass
+- correctness: every requirement of the change has an implementation: pass
+- coherence: the code follows design.md: pass with a caveat: `widget list` has no `--json` flag. No artifact of the change asks for one, design.md says plain lines, and a JSON mode would be a new feature, not part of this change.

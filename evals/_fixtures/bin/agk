@@ -6,6 +6,13 @@
 # (--change) and diff reviews (--base) are both played; a diff run records the
 # fingerprint of the workspace per round and the merge base the scope was built
 # from (rounds/<k>/merge-base), which `review fresh` compares against.
+# A case may hold plan and code review outcomes side by side (plan-round-<k>.json
+# for a --change run, code-round-<k>.json for a diff run, round-<k>.json for both)
+# and status outcomes that `review wait` plays once instead of the review
+# (plan-wait-<k>.json, code-wait-<k>.json). `apply start|wait|send` play an
+# applier: apply-round-<k>.json is the round's report (done by default, which
+# also writes the code file widget.go), apply-wait-<k>.json a status `apply wait`
+# plays once first (needs-human, cancelled).
 # `sync` and `finish` play the worktree commands on the workspace repository
 # standing on the change's branch (see scaffold-archive.sh --worktree).
 set -uo pipefail
@@ -23,8 +30,14 @@ root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # still logs and plays the outcomes of the workspace that holds the case.
 ws="$(git config --get eval.workspace 2>/dev/null || true)"
 if [ -n "$ws" ] && [ -d "$ws" ]; then root="$ws"; fi
-log="$root/agk-calls.log"
-outcomes="$root/.eval/outcomes/${EVAL_AGK_CASE:-none}"
+# A change worktree made by `apply start` (the `worktree` marker) points eval.log at
+# the main workspace: file operations stay in the directory the stand-in runs in,
+# the log and the outcomes are the main workspace's.
+logroot="$root"
+lw="$(git config --get eval.log 2>/dev/null || true)"
+if [ -n "$lw" ] && [ -d "$lw" ]; then logroot="$lw"; fi
+log="$logroot/agk-calls.log"
+outcomes="$logroot/.eval/outcomes/${EVAL_AGK_CASE:-none}"
 companion="EVAL-COMPANION"
 echo "agk $*" >> "$log"
 note() { echo "  $*" >> "$log"; }
@@ -44,6 +57,21 @@ any_dir() { # a run dir of any kind, for close: it holds a base, a change or a w
   [ -n "$d" ] && [ -d "$d" ] && { [ -f "$d/base" ] || [ -f "$d/change" ] || [ -f "$d/worker.json" ]; } || die "$d is not a run directory"
   (cd "$d" && pwd -P)
 }
+apply_run() { # validate an apply run dir: a round counter and a worker.json, no review marker
+  local d="$1"
+  [ -n "$d" ] && [ -f "$d/round" ] && [ -f "$d/worker.json" ] && [ ! -f "$d/base" ] && [ ! -f "$d/change" ] || die "$d is not an apply run directory"
+  (cd "$d" && pwd -P)
+}
+play_json() { # file round -> the file's JSON object on one line, "round" added when missing
+  local c rest
+  c="$(tr -d '\n' < "$1")"
+  case "$c" in
+    *'"round"'*) printf '%s\n' "$c" ;;
+    *) rest="${c#*\{}"; rest="${rest#"${rest%%[![:space:]]*}"}"
+       if [ "${rest:0:1}" = "}" ]; then printf '{"round":%s}\n' "$2"; else printf '{"round":%s,%s\n' "$2" "$rest"; fi ;;
+  esac
+}
+status_of() { grep -o '"status": *"[a-z-]*"' "$1" | head -1 | sed 's/.*"\([a-z-]*\)"$/\1/'; }
 untracked() { (cd "$root" && git ls-files --others --exclude-standard -- . ':(exclude).agk' ':(exclude).eval' ':(exclude)agk-calls.log'); }
 fingerprint() { # merge base -> hash of the workspace state: each path between it and the working tree with its content
   (
@@ -106,6 +134,7 @@ case "$cmd $sub" in
     fi
     fingerprint "$mb" > "$dir/rounds/1/fingerprint"
     echo "$mb" > "$dir/rounds/1/merge-base"
+    note "cwd: $PWD"
     printf '{"companion":"%s","dir":"%s","started":true}\n' "$companion" "$dir"
     exit 0
   fi
@@ -114,6 +143,7 @@ case "$cmd $sub" in
   files="$(cd "$root/openspec/changes/$change" && find . -type f | sed 's#^\./##' | sort | tr '\n' ' ')"
   [ -n "$files" ] || die "nothing to review"
   note "files: $files"
+  note "cwd: $PWD"
   n=1; while [ -e "$root/.agk/reviews/$n" ]; do n=$((n + 1)); done
   dir="$root/.agk/reviews/$n"
   mkdir -p "$dir/rounds/1"
@@ -124,12 +154,22 @@ case "$cmd $sub" in
 "review wait")
   dir="$(run_dir "${3:-}")" || exit 1
   k="$(cat "$dir/round")"; rd="$dir/rounds/$k"
+  if [ -f "$dir/base" ]; then kind=code; else kind=plan; fi
   if [ ! -f "$rd/review.json" ]; then
+    # The case's status outcome plays the wait itself once (a closed companion, a
+    # permission prompt); the next wait of the same round plays the review.
+    if [ -f "$outcomes/$kind-wait-$k.json" ] && [ ! -f "$rd/wait-played" ]; then
+      touch "$rd/wait-played"
+      note "round $k: wait played $(status_of "$outcomes/$kind-wait-$k.json")"
+      play_json "$outcomes/$kind-wait-$k.json" "$k"
+      exit 0
+    fi
     # The case's marker plays a file changing while the reviewer runs.
     if [ -f "$dir/base" ] && [ -f "$outcomes/edit-during-review" ]; then
       echo "// edited while the reviewer ran" >> "$root/widget.go"
     fi
-    if [ -f "$outcomes/round-$k.json" ]; then cp "$outcomes/round-$k.json" "$rd/review.json"
+    if [ -f "$outcomes/$kind-round-$k.json" ]; then cp "$outcomes/$kind-round-$k.json" "$rd/review.json"
+    elif [ -f "$outcomes/round-$k.json" ]; then cp "$outcomes/round-$k.json" "$rd/review.json"
     else printf '{"verdict":"approve","summary":"The plan is consistent; nothing material to report.","findings":[],"next_steps":[]}\n' > "$rd/review.json"
     fi
   fi
@@ -252,6 +292,109 @@ case "$cmd $sub" in
   [ -f "$outcomes/finish-fail" ] && die "$base has commits that branch $change lacks: run \`agk sync $change\`, check the result again, then finish"
   note "finish: merged $change into $base"
   printf '{"change":"%s","base":"%s","head":"%s","closed":[]}\n' "$change" "$base" "$(git -C "$root" rev-parse HEAD)"
+  ;;
+"apply start")
+  shift 2
+  change=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --applier) need --applier $#; shift 2 ;;
+      --applier=*|--worktree|--no-worktree|--no-pull) shift ;;
+      -*) die "unknown flag $1" ;;
+      *) [ -z "$change" ] || die "usage: agk apply start <change>"; change="$1"; shift ;;
+    esac
+  done
+  [ -n "$change" ] || die "usage: agk apply start <change>"
+  [[ "$change" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "invalid change name \"$change\": want kebab-case, like add-dark-mode"
+  [ -d "$root/openspec/changes/$change" ] || die "change \"$change\" not found: no openspec/changes/$change"
+  runroot="$root"; wtjson=null
+  # The case's `worktree` marker plays worktree mode: commit the change on the
+  # base branch (the plan commit) and run the applier in a worktree. The agent's
+  # sandbox cannot create a git worktree (it may not write .git/worktrees), so the
+  # scaffold makes it, hidden at .eval/worktree so the agent does not see a
+  # worktree or a branch of the change before the start (scaffold-archive.sh
+  # --pending-worktree, with branch.<change>.agkBase and eval.log); the stand-in
+  # only brings the plan into it.
+  if [ -f "$outcomes/worktree" ]; then
+    base="$(git -C "$root" rev-parse --abbrev-ref HEAD)"
+    wt="$root/.eval/worktree"
+    [ -d "$wt" ] || die "$wt is missing: the scaffold must make the worktree"
+    [ "$(git -C "$wt" config --get "branch.$change.agkBase" || true)" = "$base" ] || die "branch.$change.agkBase is not $base"
+    G=(-c user.name=eval -c user.email=eval@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null)
+    git -C "$root" "${G[@]}" add -- "openspec/changes/$change" || die "plan commit: git add failed"
+    git -C "$root" "${G[@]}" commit -q -m "chore(openspec): plan $change (agk apply start)" -- "openspec/changes/$change" || die "plan commit failed"
+    note "plan commit: $(git -C "$root" rev-parse --short HEAD) $(git -C "$root" log -1 --format=%s)"
+    mkdir -p "$wt/openspec/changes"
+    rm -rf "$wt/openspec/changes/$change"
+    cp -R "$root/openspec/changes/$change" "$wt/openspec/changes/$change"
+    runroot="$wt"; wtjson="\"$wt\""
+  fi
+  n=1; while [ -e "$runroot/.agk/applies/$n" ]; do n=$((n + 1)); done
+  dir="$runroot/.agk/applies/$n"
+  mkdir -p "$dir/rounds/1"
+  echo 1 > "$dir/round"
+  printf '{"worker":{"harness":"claude"},"change":"%s","interactive":true}\n' "$change" > "$dir/worker.json"
+  printf '{"companion":"%s","dir":"%s","started":true,"worktree":%s,"pulled":false}\n' "$companion" "$dir" "$wtjson"
+  ;;
+"apply wait")
+  shift 2
+  d=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --timeout) need --timeout $#; shift 2 ;;
+      --timeout=*) shift ;;
+      *) d="$1"; shift ;;
+    esac
+  done
+  dir="$(apply_run "$d")" || exit 1
+  k="$(cat "$dir/round")"; rd="$dir/rounds/$k"; mkdir -p "$rd"
+  if [ ! -f "$rd/report.json" ]; then
+    # The case's status outcome plays the wait itself once (a permission prompt, a
+    # closed companion); the next wait of the same round plays the report.
+    if [ -f "$outcomes/apply-wait-$k.json" ] && [ ! -f "$rd/wait-played" ]; then
+      touch "$rd/wait-played"
+      note "apply round $k: $(status_of "$outcomes/apply-wait-$k.json")"
+      play_json "$outcomes/apply-wait-$k.json" "$k"
+      exit 0
+    fi
+    if [ -f "$outcomes/apply-round-$k.json" ]; then cp "$outcomes/apply-round-$k.json" "$rd/report.json"
+    else
+      change="$(sed -n 's/.*"change":"\([^"]*\)".*/\1/p' "$dir/worker.json")"
+      total="$(grep -c '^- \[' "$root/openspec/changes/$change/tasks.md" 2>/dev/null || true)"
+      total="${total:-0}"; [ "$total" -gt 0 ] || total=1
+      printf '{"status":"done","progress":"%s/%s","summary":"Implemented the change; the gates pass."}\n' "$total" "$total" > "$rd/report.json"
+    fi
+    # A finished round leaves the code file the diff review has a scope in.
+    if [ "$(status_of "$rd/report.json")" = done ]; then
+      if [ ! -f "$root/widget.go" ]; then printf 'package widget\n\n// List prints the project widgets.\nfunc List() {}\n' > "$root/widget.go"
+      elif [ "$k" -gt 1 ]; then echo "// applier round $k" >> "$root/widget.go"; fi
+    fi
+  fi
+  note "apply round $k: $(status_of "$rd/report.json")"
+  play_json "$rd/report.json" "$k"
+  ;;
+"apply send")
+  shift 2
+  d=""; notefile=""; stdin=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stdin) stdin=1; shift ;;
+      -*) die "unknown flag $1" ;;
+      *) if [ -z "$d" ]; then d="$1"; else notefile="$1"; fi; shift ;;
+    esac
+  done
+  dir="$(apply_run "$d")" || exit 1
+  if [ "$stdin" = 1 ] && [ -n "$notefile" ]; then die "give a note file or --stdin, not both"; fi
+  if [ "$stdin" = 0 ] && [ -z "$notefile" ]; then die "usage: agk apply send <dir> (<file>|--stdin)"; fi
+  k="$(cat "$dir/round")"
+  [ -f "$dir/rounds/$k/report.json" ] || die "round $k of $dir is still running; wait for it first"
+  next=$((k + 1)); mkdir -p "$dir/rounds/$next"
+  if [ "$stdin" = 1 ]; then cat > "$dir/rounds/$next/note.md"
+  else [ -r "$notefile" ] || die "read note: $notefile: no such file"; cp "$notefile" "$dir/rounds/$next/note.md"
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do note "note: $line"; done < "$dir/rounds/$next/note.md"
+  echo "$next" > "$dir/round"
+  printf '{"round":%s,"started":true}\n' "$next"
   ;;
 "apply close")
   dir="$(any_dir "${3:-}")" || exit 1

@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-plain-request
+description: "Plain build request: without naming agk-autopilot the agent starts no agk apply or agk review run."
+plugins: ["../../case-plugins/autopilot-plain-request"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-plain-request

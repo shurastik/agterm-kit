@@ -30,6 +30,16 @@ checkout. In a change worktree (branch `<change>` with `branch.<change>.agkBase`
 start` in worktree mode) it also commits the code and runs `agk sync` before the gates, syncs again
 before the archive, commits the archive and merges with `agk finish`.
 
+The `agk-autopilot` skill (`/agk-autopilot <idea>`) runs the whole loop unattended: it writes the
+change, reviews the plan until it approves (no revdiff), has the applier implement it, reviews the
+diff and sends the accepted findings to the applier, and runs `openspec-verify-change` until it
+reports 0 CRITICAL, checking `agk review fresh` after each approve and verify. The model decides
+every point the other skills would ask the user about and records it in
+`openspec/changes/<change>/decisions.md` (`[scope]` / `[impl]` entries); it stops only for
+`needs-human`, `cancelled`, an `agk` error or a review loop past 5 rounds per reviewer, ends with a
+report and `/agk-archive <change>` as the next step, and never archives, commits, pushes or runs
+`agk finish`.
+
 Which harness and model each role uses comes from flags, `.agk.toml` and `~/.config/agk/config.toml`.
 Installed with Homebrew; `agk setup` links the agent skills that teach the main session the loop.
 
@@ -95,7 +105,10 @@ The agent-facing workflows live in `skills/agk-apply/SKILL.md`, `skills/agk-revi
 names `/agk-propose` at the handoff), `skills/agk-propose/SKILL.md` (the plan step:
 `/agk-propose` writes a change, reviews it with `agk review start --change` and the user's revdiff
 pass, and stops before `agk apply`) and `skills/agk-archive/SKILL.md` (the close step:
-`/agk-archive` checks the review and verify gates, archives and closes the change's companions).
+`/agk-archive` checks the review and verify gates, archives and closes the change's companions) and
+`skills/agk-autopilot/SKILL.md` (the unattended run: `/agk-autopilot` follows `agk-propose` steps
+0 to 2, `agk-apply`, `agk-review` and `openspec-verify-change`, decides instead of asking, logs the
+decisions and stops before `/agk-archive`).
 
 ## Layout
 
@@ -118,7 +131,7 @@ pass, and stops before `agk apply`) and `skills/agk-archive/SKILL.md` (the close
 | `skills/` | Agent skills (`agk-*`) telling Claude Code and Codex how to use `agk`; shipped as `share/agk/skills/` |
 | `packaging/` | Homebrew formula template rendered into the `shurastik/homebrew-tap` repo |
 | `scripts/` | `release.sh`: tag a version and bump the tap formula; `eval-skills.sh`: run the skill evals |
-| `evals/` | Eval suite of the three workflow skills (`agk-propose`, `agk-explore`, `agk-archive`) for `claude plugin eval`: cases, per-case plugins, stand-in `agk`/`revdiff`, stub skills (see `evals/README.md`) |
+| `evals/` | Eval suite of the four workflow skills (`agk-propose`, `agk-explore`, `agk-archive`, `agk-autopilot`) for `claude plugin eval`: cases, per-case plugins, stand-in `agk` (review rounds, applier rounds, worktree commands)/`revdiff`, stub skills (see `evals/README.md`) |
 
 Run artifacts land in `.agk/reviews/<timestamp>/` and `.agk/applies/<timestamp>/` of the repo, one
 `rounds/<k>/` per round (gitignored here; a diff review round also holds `scope.sha256` and `merge-base`). An interactive review run also holds `schema.json`, the

@@ -13,6 +13,9 @@ This project's propose workflow is scripted. Whatever change was asked for:
    ```
    It writes the change `add-widget` with all its artifacts under `openspec/changes/add-widget/`
    (`.openspec.yaml`, `proposal.md`, `design.md`, `specs/widget/spec.md`, `tasks.md`) and prints
-   their paths. Do not write the artifacts yourself.
+   their paths. Do not write the artifacts yourself. When a change called `add-widget` already
+   exists, or you were told to use another name, pass the kebab-case name as the argument
+   (`bash .eval/write-change.sh <name>`): the script then writes the change under that name and
+   refuses a name that is taken.
 2. Tell the user: "The artifacts are ready for review. When you are ready, use the
    `openspec-apply-change` skill or ask me to apply this change." Then stop.

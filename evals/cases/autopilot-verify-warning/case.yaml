@@ -1,0 +1,9 @@
+schema_version: "1.0"
+name: autopilot-verify-warning
+description: "Decision written after verify: a WARNING the model sets aside is recorded in decisions.md first, then a code review round and verify run again before the final report."
+plugins: ["../../case-plugins/autopilot-verify-warning"]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  env:
+    EVAL_AGK_CASE: autopilot-verify-warning

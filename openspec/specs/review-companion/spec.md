@@ -70,27 +70,32 @@ Each round k SHALL get `rounds/<k>/` with `prompt.md`, `result.json` (`completed
 - **THEN** it is treated as a diff review against that base
 
 ### Requirement: Companion session inside agterm
-When `AGTERM_ENABLED` and `AGTERM_SESSION_ID` are set, `agk review start` SHALL create a terminal companion of the current session, where N is the review number. The companion SHALL be named:
-- `<change> · <harness>-plan #<N>` for a plan review of `<change>`;
-- `<change> · <harness>-review #<N>` for a diff review started with `--for <change>`;
-- `<harness>-review #<N>` for a diff review without `--for`.
+When `AGTERM_ENABLED` and `AGTERM_SESSION_ID` are set, `agk review start` SHALL create a terminal companion of the current session, named after round 1. The companion SHALL be named:
+- `<change> · <harness>-plan r1` for a plan review of `<change>`;
+- `<change> · <harness>-review r1` for a diff review started with `--for <change>`;
+- `<harness>-review r1` for a diff review without `--for`.
 
 The companion is created in the background without changing the selected session. It SHALL run the reviewer harness interactively, and round 1 SHALL be started by a single line telling the reviewer to read `rounds/1/prompt.md`. The command SHALL print one JSON object `{"companion": "<id>", "dir": "<run dir>", "started": <bool>}` on stdout and exit 0 without waiting for the review.
 
 #### Scenario: Companion appears under the agent session
 - **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `codex`
 - **WHEN** it runs `agk review start --base main`
-- **THEN** a session named `codex-review #<N>` appears as a companion under S, S stays selected, the companion runs an interactive codex session whose first prompt points at `rounds/1/prompt.md`, and stdout is a JSON object with the companion id, the absolute run directory and `started`
+- **THEN** a session named `codex-review r1` appears as a companion under S, S stays selected, the companion runs an interactive codex session whose first prompt points at `rounds/1/prompt.md`, and stdout is a JSON object with the companion id, the absolute run directory and `started`
 
 #### Scenario: Diff review of a change
 - **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `codex`
 - **WHEN** it runs `agk review start --base main --for add-auth`
-- **THEN** the companion under S is named `add-auth · codex-review #<N>`
+- **THEN** the companion under S is named `add-auth · codex-review r1`
 
 #### Scenario: Plan review of a change
 - **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `claude`
 - **WHEN** it runs `agk review start --change add-auth`
-- **THEN** the companion under S is named `add-auth · claude-plan #<N>`
+- **THEN** the companion under S is named `add-auth · claude-plan r1`
+
+#### Scenario: No run number in the name
+- **GIVEN** a repository with seven earlier run directories under `.agk/reviews/`
+- **WHEN** a codex review is started with `agk review start --base main`
+- **THEN** the companion is named `codex-review r1`, with no `#8` or other run number
 
 #### Scenario: Agent session keeps its name
 - **GIVEN** the agent runs in agterm session S
@@ -108,20 +113,20 @@ The companion is created in the background without changing the selected session
 
 ### Requirement: Progress and outcome status
 Inside agterm, the companion's agent status SHALL come only from the reviewer harness's turns: `active` while a turn runs, `completed` or `idle` when it ends, `blocked` while the reviewer waits for a permission answer. agk SHALL NOT set it. agk SHALL set the info line instead:
-- `<harness> #<N> r<k>: reviewing` when it starts or sends round k;
+- `<harness> r<k>: reviewing` when it starts or sends round k;
 - a line counting findings by severity when `agk review wait` records a completed round;
 - a line stating the failure reason when it records a failed round.
 
 #### Scenario: Findings reported
-- **WHEN** `agk review wait` records round 1 of codex review #4 with 3 findings, one of them `high`
-- **THEN** the companion's info line reads `codex #4 r1: 3 findings (1 high)` and its agent status is whatever the reviewer's turn reports
+- **WHEN** `agk review wait` records round 1 of a codex review with 3 findings, one of them `high`
+- **THEN** the companion's info line reads `codex r1: 3 findings (1 high)` and its agent status is whatever the reviewer's turn reports
 
 #### Scenario: Clean review
-- **WHEN** `agk review wait` records round 2 of codex review #4 with verdict `approve` and no findings
-- **THEN** the companion's info line reads `codex #4 r2: approve, no findings`
+- **WHEN** `agk review wait` records round 2 of a codex review with verdict `approve` and no findings
+- **THEN** the companion's info line reads `codex r2: approve, no findings`
 
 #### Scenario: Codex fails
-- **WHEN** `agk review wait` records round 1 of codex review #4 as failed with reason `invalid review output`
+- **WHEN** `agk review wait` records round 1 of a codex review as failed with reason `invalid review output`
 - **THEN** the companion's info line names the failure, its agent status is not set to `blocked` by agk, no `review.json` is written for the round, and the reviewer session stays open for the next round
 
 #### Scenario: Agent waits for the outcome
@@ -130,28 +135,16 @@ Inside agterm, the companion's agent status SHALL come only from the reviewer ha
 - **THEN** the wait returns once round 1 has an outcome or the reviewer needs the user, with the matching status
 
 #### Scenario: Round in progress
-- **WHEN** `agk review send` starts round 2 of claude review #5
-- **THEN** the companion's info line reads `claude #5 r2: reviewing`
-
-### Requirement: Review numbering
-Each review SHALL have a number N: the 1-based position of its run directory among the run directories of the repository, ordered by creation time. The number SHALL stay the same for the whole run, across all its rounds.
-
-#### Scenario: Numbers count up per repository
-- **GIVEN** a repository with seven earlier run directories under `.agk/reviews/`
-- **WHEN** a codex review is started
-- **THEN** it is review #8: the companion is named `codex-review #8` and its info lines start with `codex #8 r1:`
-
-#### Scenario: Later runs do not renumber earlier ones
-- **WHEN** another review is started while review #8 is still running
-- **THEN** the running review keeps number 8 in its status updates and the new one is #9
+- **WHEN** `agk review send` starts round 2 of a claude review
+- **THEN** the companion's info line reads `claude r2: reviewing`
 
 ### Requirement: Timestamped review log
-The inline review SHALL print a header line with the review number, round, start date and time and run directory. It SHALL show the reviewer's progress as readable lines. Every output line, in the terminal and in the round's `reviewer.log`, SHALL carry the local date and time prefix `[YYYY-MM-DD HH:MM:SS]`. Inside agterm the companion SHALL show the harness's own interface instead.
+The inline review SHALL print a header line with the round, start date and time and run directory. It SHALL show the reviewer's progress as readable lines. Every output line, in the terminal and in the round's `reviewer.log`, SHALL carry the local date and time prefix `[YYYY-MM-DD HH:MM:SS]`. Inside agterm the companion SHALL show the harness's own interface instead.
 
 #### Scenario: Log lines carry date and time
 - **GIVEN** `AGTERM_ENABLED` is unset
-- **WHEN** the reviewer reports `thinking` and then `done` during round 1 of review #3 started at 2026-11-05 17:53:55
-- **THEN** the first line reads `[2026-11-05 17:53:55] agk: review #3 round 1 started, run dir <dir>` and the progress is shown as `[<date> <time>] thinking` and `[<date> <time>] done`, both on screen and in `rounds/1/reviewer.log`
+- **WHEN** the reviewer reports `thinking` and then `done` during round 1 of a review started at 2026-11-05 17:53:55
+- **THEN** the first line reads `[2026-11-05 17:53:55] agk: review round 1 started, run dir <dir>` and the progress is shown as `[<date> <time>] thinking` and `[<date> <time>] done`, both on screen and in `rounds/1/reviewer.log`
 
 #### Scenario: Harness interface inside agterm
 - **GIVEN** the agent runs inside agterm
@@ -383,7 +376,7 @@ After each round, successful or failed, the reviewer session SHALL stay open in 
 #### Scenario: Request arrives
 - **GIVEN** companion C of D finished round 1
 - **WHEN** the agent runs `agk review send D`
-- **THEN** one line is typed into C, C's status becomes `active`, its info line reads `<harness> #<N> r2: reviewing`, and round 2 runs in the same reviewer session
+- **THEN** one line is typed into C, C's status becomes `active`, its info line reads `<harness> r2: reviewing`, and round 2 runs in the same reviewer session
 
 ### Requirement: Close the reviewer
 `agk review close <run-dir>` SHALL close the run's companion so it can be restored with agterm's undo, and SHALL exit 0 when the companion is already gone or the run has none.
@@ -761,3 +754,36 @@ After typing a round or fix-up line into the reviewer, agk SHALL wait up to 10 s
 #### Scenario: Together with a plan review
 - **WHEN** the agent runs `agk review start --change add-auth --for add-auth`
 - **THEN** the command exits 1 saying `--for` and `--change` exclude each other, and no run directory or companion is created
+
+### Requirement: Reviewer companion renamed for each round
+Once `agk review send` has typed round k+1 into the reviewer companion, it SHALL rename the companion to the name `agk review start` gives it with `r<k+1>` in place of `r1`. A failed rename SHALL be a warning on stderr and SHALL NOT change the command's stdout or exit code. A round that was not typed (busy, permission prompt, gone) SHALL NOT rename it.
+
+#### Scenario: Second round renames the companion
+- **GIVEN** review run D of `add-auth` with companion `add-auth · codex-review r1` whose round 1 completed
+- **WHEN** the agent runs `agk review send D`
+- **THEN** after the line for round 2 is typed, the companion is named `add-auth · codex-review r2`
+
+#### Scenario: Plan review renamed
+- **GIVEN** plan review run D of `add-x` with companion `add-x · claude-plan r2` whose round 2 completed
+- **WHEN** the agent runs `agk review send D`
+- **THEN** the companion is named `add-x · claude-plan r3`
+
+#### Scenario: Unconfirmed round still renames
+- **GIVEN** the reviewer of D does not report round 2 as started after the line is typed
+- **WHEN** `agk review send D` prints `"started": false`
+- **THEN** the companion is named after round 2, because round 2 stays recorded
+
+#### Scenario: Rename fails
+- **GIVEN** agterm refuses the rename of D's companion
+- **WHEN** the agent runs `agk review send D` and round 2 is typed and starts
+- **THEN** stderr carries a warning naming the rename failure, stdout carries `"round": 2` and `"started": true`, and the exit code is 0
+
+#### Scenario: Reviewer busy keeps the name
+- **GIVEN** the reviewer of D is mid-turn
+- **WHEN** `agk review send D --timeout 30` gives up after 30 seconds
+- **THEN** no rename is attempted and the companion keeps its name
+
+#### Scenario: Inline review has nothing to rename
+- **GIVEN** a review run D with no companion
+- **WHEN** the agent runs `agk review send D`
+- **THEN** agk calls no agterm rename

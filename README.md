@@ -205,9 +205,11 @@ worker is idle. Outside agterm the output has no `started` field.
 `--change`): the review is the same, and the run records the name.
 
 The sidebar names of the companions carry the change, so several changes in flight stay apart:
-`<change> · <harness>-apply #N` for the applier, `<change> · <harness>-plan #N` for a plan review
-(`--change`), `<change> · <harness>-review #N` for a diff review started with `--for`, and
-`<harness>-review #N` for one without. agk names only the companions it creates; your own session
+`<change> · <harness>-apply r<k>` for the applier, `<change> · <harness>-plan r<k>` for a plan review
+(`--change`), `<change> · <harness>-review r<k>` for a diff review started with `--for`, and
+`<harness>-review r<k>` for one without. `<k>` is the round the worker is on: a companion starts as
+`r1` and `agk review send` / `agk apply send` rename it to the new round once the line is typed (a
+failed rename is only a warning on stderr). agk names only the companions it creates; your own session
 keeps its name.
 
 `agk review fresh <review run dir>` is read-only: it prints `{"fresh":true|false,"round":K,"merge_base":"<sha>"}`,

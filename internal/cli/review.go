@@ -129,7 +129,6 @@ func writeResult(rd string, r runResult) error {
 // reviewRun is a verified run directory of a review.
 type reviewRun struct {
 	dir, root string
-	num       int
 	state     reviewState
 }
 
@@ -142,11 +141,7 @@ func loadReviewRun(dir string) (reviewRun, error) {
 	if err != nil {
 		return reviewRun{}, err
 	}
-	num, err := rundir.Number(dir)
-	if err != nil {
-		return reviewRun{}, err
-	}
-	r := reviewRun{dir: dir, root: root, num: num}
+	r := reviewRun{dir: dir, root: root}
 	have, err := rundir.ReadJSON(dir, workerFile, &r.state)
 	if err != nil {
 		return reviewRun{}, err
@@ -161,7 +156,7 @@ func loadReviewRun(dir string) (reviewRun, error) {
 }
 
 func (r reviewRun) label(k int) review.Label {
-	return review.Label{Harness: r.state.Worker.Harness, Num: r.num, Round: k}
+	return review.Label{Harness: r.state.Worker.Harness, Round: k}
 }
 
 // runRound runs round k of the inline review in dir (outside agterm, the
@@ -186,7 +181,7 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer) i
 	if err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d started, run dir %s\n", run.num, k, run.dir)
+	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review round %d started, run dir %s\n", k, run.dir)
 	turn := harness.Turn{Worker: run.state.Worker, Root: run.root, Dir: rd, Log: reviewLog, Prompt: string(prompt),
 		Session: run.state.Session, Resume: run.state.Session != ""}
 	session, rerr := driver.Review(ctx, turn, term)
@@ -217,8 +212,8 @@ func (e *Env) runRound(ctx context.Context, dir string, k int, term io.Writer) i
 	if err := writeResult(rd, runResult{Status: "completed", Round: k, Findings: len(r.Findings), Verdict: r.Verdict}); err != nil {
 		return fail(review.ReasonSetupFailed, err)
 	}
-	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review #%d round %d: %d finding(s), verdict %s -> %s\n",
-		run.num, k, len(r.Findings), r.Verdict, filepath.Join(rd, "review.json"))
+	fmt.Fprintf(harness.NewStampWriter(term, e.Now), "agk: review round %d: %d finding(s), verdict %s -> %s\n",
+		k, len(r.Findings), r.Verdict, filepath.Join(rd, "review.json"))
 	return ExitOK
 }
 
@@ -397,11 +392,7 @@ func (e *Env) startInteractive(ctx context.Context, parent, dir string, sc round
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	num, err := rundir.Number(dir)
-	if err != nil {
-		return e.errorf("%v", err)
-	}
-	id, err := e.startCompanion(ctx, parent, reviewCompanionName(state, num), cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, reviewCompanionName(state, 1), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -409,17 +400,17 @@ func (e *Env) startInteractive(ctx context.Context, parent, dir string, sc round
 	if started {
 		markStarted(dir, 1)
 	}
-	reporter{env: e, target: id}.set(ctx, "active", review.ReviewingLine(review.Label{Harness: w.Harness, Num: num, Round: 1}))
+	reporter{env: e, target: id}.set(ctx, "active", review.ReviewingLine(review.Label{Harness: w.Harness, Round: 1}))
 	return e.printJSON(workerStart{Companion: &id, Dir: dir, Started: started})
 }
 
 // reviewCompanionName names the companion of a review: a plan review carries
 // its change as "-plan", a diff review the change it was started --for, if any.
-func reviewCompanionName(state reviewState, num int) string {
+func reviewCompanionName(state reviewState, round int) string {
 	if state.Change != "" {
-		return companionName(state.Change, state.Worker.Harness, "plan", num)
+		return companionName(state.Change, state.Worker.Harness, "plan", round)
 	}
-	return companionName(state.For, state.Worker.Harness, "review", num)
+	return companionName(state.For, state.Worker.Harness, "review", round)
 }
 
 // reviewOutput is the output contract of an interactive round: the reviewer
@@ -622,6 +613,7 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 	if started {
 		markStarted(run.dir, k+1)
 	}
+	e.renameCompanion(ctx, reviewerWorker, companion, reviewCompanionName(run.state, k+1))
 	reporter{env: e, target: companion}.set(ctx, "active", review.ReviewingLine(run.label(k+1)))
 	return e.printJSON(sendResult{Companion: &companion, Dir: run.dir, Round: k + 1, Started: &started})
 }

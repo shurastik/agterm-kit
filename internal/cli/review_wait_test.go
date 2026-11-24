@@ -145,7 +145,7 @@ func TestReviewWaitValidOutputMidTurnCompletes(t *testing.T) {
 	}
 	assertCalls(t, h.ctl,
 		mainWait("30m0s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}},
 	)
 	noStatus(t, h)
 }
@@ -164,7 +164,7 @@ func TestReviewWaitValidOutputAlreadyThereNeedsNoWait(t *testing.T) {
 	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Info"}) {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
-	if got := infos(h); len(got) != 1 || got[0] != `codex #1 r1: ^[approve](color: "green"), no findings` {
+	if got := infos(h); len(got) != 1 || got[0] != `codex r1: ^[approve](color: "green"), no findings` {
 		t.Fatalf("infos = %q", got)
 	}
 }
@@ -279,7 +279,7 @@ func TestReviewWaitThreeInvalidOutputsBlockTheRound(t *testing.T) {
 		t.Fatal("review.json must not be written")
 	}
 	assertResult(t, rd, "blocked", 0)
-	if got := infos(h); !reflect.DeepEqual(got, []string{"codex #1 r1: invalid review output"}) {
+	if got := infos(h); !reflect.DeepEqual(got, []string{"codex r1: invalid review output"}) {
 		t.Fatalf("infos = %q", got)
 	}
 	noStatus(t, h)
@@ -453,7 +453,7 @@ func TestReviewWaitHalfRewrittenFileAfterUnconfirmedFixup(t *testing.T) {
 		t.Fatalf("stdout %q typed %q", h.out, typed(h))
 	}
 	assertCalls(t, h.ctl, activeBlocked("5s"), activeBlocked("5s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}})
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}})
 }
 
 func TestReviewWaitPermissionDuringUnconfirmedFixup(t *testing.T) {
@@ -539,7 +539,7 @@ func TestReviewWaitRoundStartGate(t *testing.T) {
 	assertCalls(t, h.ctl,
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,blocked,completed", "30m0s"}},
 		mainWait("30m0s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r1: **3** findings (^[1 high](color: \"orange\"))"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}},
 	)
 }
 

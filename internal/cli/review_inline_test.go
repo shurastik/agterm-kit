@@ -127,10 +127,10 @@ func TestInlineReviewPrintsTimestampedHeader(t *testing.T) {
 	_, dir, _ := inlineStart(t, h)
 	// Reviewer output goes to stderr inline so stdout stays JSON.
 	first := strings.SplitN(h.err.String(), "\n", 2)[0]
-	if want := "[2026-11-05 10:00:00] agk: review #1 round 1 started, run dir " + dir; first != want {
+	if want := "[2026-11-05 10:00:00] agk: review round 1 started, run dir " + dir; first != want {
 		t.Fatalf("header = %q, want %q", first, want)
 	}
-	if !strings.Contains(h.err.String(), "[2026-11-05 10:00:00] agk: review #1 round 1: 3 finding(s)") {
+	if !strings.Contains(h.err.String(), "[2026-11-05 10:00:00] agk: review round 1: 3 finding(s)") {
 		t.Fatalf("footer missing:\n%s", h.err)
 	}
 }

@@ -84,7 +84,7 @@ func TestApplyStartClaude(t *testing.T) {
 	kickoff := "Read " + prompt + " and follow it."
 	wantCmd := "'claude' '--model=' '--session=SESS-NEW' '" + kickoff + "'"
 	assertCalls(t, h.ctl,
-		agtermtest.Call{Method: "NewCompanion", Args: []string{"SELF", "add-auth · claude-apply #1", wantCmd, root}},
+		agtermtest.Call{Method: "NewCompanion", Args: []string{"SELF", "add-auth · claude-apply r1", wantCmd, root}},
 		agtermtest.Call{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
 	)
 	for _, m := range h.ctl.Methods() {
@@ -108,7 +108,7 @@ func TestApplyStartCodex(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	dir := applyDir(root)
-	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · codex-apply #1" {
+	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · codex-apply r1" {
 		t.Fatalf("name = %q", name)
 	}
 	if s := readApplyState(t, dir); s.Session != "" || s.Worker.Model != "gpt-5.5" || s.Worker.PermissionMode != "" || s.TurnHooks {
@@ -426,6 +426,7 @@ func TestApplySend(t *testing.T) {
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "10m0s"}},
 		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
+		agtermtest.Call{Method: "Rename", Args: []string{"C-1", "add-auth · claude-apply r2"}},
 	)
 	if h.out.String() != `{"round":2,"started":true}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
@@ -483,6 +484,9 @@ func TestApplySendRefusals(t *testing.T) {
 				if call.Method == "Type" && name != "type gone" {
 					t.Fatal("nothing may be typed")
 				}
+				if call.Method == "Rename" {
+					t.Fatalf("a refused round must not rename the companion: %v", h.ctl.Calls)
+				}
 			}
 		})
 	}
@@ -505,6 +509,27 @@ func TestApplySendHandshakeTimeoutWarns(t *testing.T) {
 	}
 	if exists(filepath.Join(rundir.RoundDir(dir, 2), startedFile)) {
 		t.Fatal("round 2 must not be marked started without active")
+	}
+	if c := h.ctl.Calls[len(h.ctl.Calls)-1]; c.Method != "Rename" || c.Args[1] != "add-auth · claude-apply r2" {
+		t.Fatalf("an unconfirmed round stays recorded, so the companion is renamed: %v", h.ctl.Calls)
+	}
+}
+
+func TestApplySendRenameFailureIsAWarning(t *testing.T) {
+	h := newHarness(t, true)
+	dir := startedApply(t, h, 1)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	h.ctl.RenameErr = errors.New("agterm said no")
+	msg := filepath.Join(t.TempDir(), "m.md")
+	os.WriteFile(msg, []byte("m"), 0o644)
+	if code := runApply(h, "send", dir, msg); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.err.String(), "agk: warning: rename applier C-1: agterm said no") {
+		t.Fatalf("stderr %q", h.err)
+	}
+	if h.out.String() != `{"round":2,"started":true}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
 	}
 }
 
@@ -666,7 +691,7 @@ func TestApplyStartMalformedApplierFlag(t *testing.T) {
 	}
 }
 
-func TestApplyStartNumbersRunsPerKind(t *testing.T) {
+func TestApplyStartNamesRoundOneAfterEarlierRuns(t *testing.T) {
 	h := newHarness(t, true)
 	root := repoWith(t, h, "")
 	h.ctl.WaitStatus = "active"
@@ -678,7 +703,7 @@ func TestApplyStartNumbersRunsPerKind(t *testing.T) {
 	if code := runApply(h, "start", "add-auth"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · claude-apply #3" {
+	if name := h.ctl.Calls[0].Args[1]; name != "add-auth · claude-apply r1" {
 		t.Fatalf("name = %q", name)
 	}
 }

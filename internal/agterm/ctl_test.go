@@ -97,6 +97,22 @@ func TestStatusError(t *testing.T) {
 	}
 }
 
+func TestRename(t *testing.T) {
+	s := &stubExec{stdout: "ok"}
+	if err := newCLI(s).Rename(context.Background(), "C-1", "add-auth · codex-review r2"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, s, []string{"session", "rename", "add-auth · codex-review r2", "--target", "C-1"})
+}
+
+func TestRenameError(t *testing.T) {
+	s := &stubExec{code: 1, stderr: "no such session"}
+	err := newCLI(s).Rename(context.Background(), "C-1", "n")
+	if err == nil || !strings.Contains(err.Error(), "no such session") {
+		t.Fatalf("err = %v, want stderr in message", err)
+	}
+}
+
 func TestInfo(t *testing.T) {
 	s := &stubExec{stdout: "ok"}
 	if err := newCLI(s).Info(context.Background(), "C-1", "-codex: reviewing"); err != nil {
@@ -112,6 +128,7 @@ func TestSocketPassedToEveryCall(t *testing.T) {
 	c.NewCompanion(ctx, "P", "n", "cmd", "/d")
 	c.Status(ctx, "C", "active")
 	c.Info(ctx, "C", "-x")
+	c.Rename(ctx, "C", "n")
 	for _, cl := range s.calls {
 		args := strings.Join(cl.args, " ")
 		if !strings.Contains(args, "--socket /alt.sock") {

@@ -106,7 +106,8 @@ func TestReviewSendSecondRound(t *testing.T) {
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "10m0s"}},
 		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex #1 r2: reviewing"}},
+		agtermtest.Call{Method: "Rename", Args: []string{"C-1", "codex-review r2"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r2: reviewing"}},
 	)
 	noStatus(t, h)
 	if !roundStarted(dir, 2) {
@@ -203,6 +204,9 @@ func TestReviewSendRefusals(t *testing.T) {
 			if name != "reviewer gone typed" && name != "send error" && len(typed(h)) != 0 {
 				t.Fatalf("nothing may be typed: %v", h.ctl.Calls)
 			}
+			if len(renames(h)) != 0 {
+				t.Fatalf("a refused round must not rename the companion: %v", h.ctl.Calls)
+			}
 			noStatus(t, h)
 		})
 	}
@@ -263,6 +267,75 @@ func TestReviewSendHandshakeTimeoutWarns(t *testing.T) {
 	}
 	if roundStarted(dir, 2) {
 		t.Fatal("an unconfirmed round must not be marked started")
+	}
+	if got := renames(h); !reflect.DeepEqual(got, []string{"C-1 codex-review r2"}) {
+		t.Fatalf("an unconfirmed round stays recorded, so the companion is renamed: %q", got)
+	}
+}
+
+// renames lists the Rename calls as "<target> <name>".
+func renames(h *tenv) []string {
+	var out []string
+	for _, c := range h.ctl.Calls {
+		if c.Method == "Rename" {
+			out = append(out, c.Args[0]+" "+c.Args[1])
+		}
+	}
+	return out
+}
+
+func TestReviewSendRenamesDiffReviewOfChange(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "T-1", true)
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "codex"}, Base: "main", For: "add-auth", Session: "T-1", Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if got := renames(h); !reflect.DeepEqual(got, []string{"C-1 add-auth · codex-review r2"}) {
+		t.Fatalf("renames = %q", got)
+	}
+}
+
+func TestReviewSendRenamesPlanReviewToRoundThree(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir, _ := planSendDir(t, h, "T-1", true, "TASKS\n")
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "claude"}, Change: "add-x", Session: "T-1", Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rundir.MakeRound(dir, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := rundir.SetRound(dir, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rundir.RoundDir(dir, 2), "result.json"), []byte(completedResult+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if got := renames(h); !reflect.DeepEqual(got, []string{"C-1 add-x · claude-plan r3"}) {
+		t.Fatalf("renames = %q", got)
+	}
+}
+
+func TestReviewSendRenameFailureIsAWarning(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "T-1", true)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	h.ctl.RenameErr = errors.New("agterm said no")
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if !strings.Contains(h.err.String(), "agk: warning: rename reviewer C-1: agterm said no") {
+		t.Fatalf("stderr %q", h.err)
+	}
+	if want := `{"companion":"C-1","dir":"` + dir + `","round":2,"started":true}` + "\n"; h.out.String() != want {
+		t.Fatalf("stdout = %q", h.out)
 	}
 }
 

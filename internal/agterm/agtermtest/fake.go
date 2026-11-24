@@ -32,6 +32,7 @@ type Fake struct {
 	CompanionErr error
 	StatusErr    error
 	InfoErr      error
+	RenameErr    error
 	WaitStatus   string
 	WaitErr      error
 	CloseErr     error
@@ -94,6 +95,11 @@ func (f *Fake) Status(ctx context.Context, target, state string) error {
 func (f *Fake) Info(ctx context.Context, target, markdown string) error {
 	f.record(ctx, "Info", target, markdown)
 	return f.InfoErr
+}
+
+func (f *Fake) Rename(ctx context.Context, target, name string) error {
+	f.record(ctx, "Rename", target, name)
+	return f.RenameErr
 }
 
 // WaitResult is one scripted Wait answer.

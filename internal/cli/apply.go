@@ -221,11 +221,7 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	num, err := rundir.Number(dir)
-	if err != nil {
-		return e.errorf("%v", err)
-	}
-	id, err := e.startCompanion(ctx, parent, companionName(change, w.Harness, "apply", num), cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, companionName(change, w.Harness, "apply", 1), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
 	}
@@ -435,6 +431,7 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if started {
 		markStarted(run.dir, k)
 	}
+	e.renameCompanion(ctx, applierWorker, companion, companionName(run.state.Change, run.state.Worker.Harness, "apply", k))
 	return e.printJSON(sendRound{Round: k, Started: &started})
 }
 

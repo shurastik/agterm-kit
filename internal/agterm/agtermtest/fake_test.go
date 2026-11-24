@@ -18,7 +18,11 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 	_ = f.Status(ctx, "C", "active")
 	infoErr := f.Info(ctx, "C", "md")
 	_ = f.Type(ctx, "C", "go\r")
+	renameErr := f.Rename(ctx, "C", "new name")
 	screen, _ := f.Text(ctx, "C", 20)
+	if renameErr != nil {
+		t.Fatalf("renameErr = %v", renameErr)
+	}
 	if id != "C" || infoErr == nil || typed != "go\r" || screen != "screen" {
 		t.Fatalf("scripted results not returned: id=%q infoErr=%v typed=%q screen=%q", id, infoErr, typed, screen)
 	}
@@ -27,6 +31,7 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 		{"Status", []string{"C", "active"}},
 		{"Info", []string{"C", "md"}},
 		{"Type", []string{"C", "go\r"}},
+		{"Rename", []string{"C", "new name"}},
 		{"Text", []string{"C", "20"}},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {

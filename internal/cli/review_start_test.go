@@ -91,9 +91,9 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	wantCmd := fmt.Sprintf("env 'PATH=/opt/homebrew/bin:/usr/bin' 'codex' 'review' '--model=' '--root=%s' '--out=%s' '--settings=' '--session=' '%s'",
 		root, filepath.Join(dir, "out"), first)
 	want := []agtermtest.Call{
-		{Method: "NewCompanion", Args: []string{"SELF", "codex-review #1", wantCmd, root}},
+		{Method: "NewCompanion", Args: []string{"SELF", "codex-review r1", wantCmd, root}},
 		{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
-		{Method: "Info", Args: []string{"COMP-1", "codex #1 r1: reviewing"}},
+		{Method: "Info", Args: []string{"COMP-1", "codex r1: reviewing"}},
 	}
 	if !reflect.DeepEqual(h.ctl.Calls, want) {
 		t.Fatalf("calls = %v\nwant %v", h.ctl.Calls, want)
@@ -125,6 +125,23 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	noStatus(t, h)
 }
 
+func TestReviewStartNamesRoundOneAfterEarlierRuns(t *testing.T) {
+	h := newHarness(t, true)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	scriptScope(h, root)
+	for i := 1; i <= 7; i++ {
+		if err := os.MkdirAll(filepath.Join(root, ".agk", "reviews", fmt.Sprintf("2026110%d-090000", i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := h.env.ReviewStart(context.Background(), []string{"--base", "main"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "codex-review r1" {
+		t.Fatalf("companion call = %v", c)
+	}
+}
+
 func TestReviewStartClaudeInteractive(t *testing.T) {
 	h := newHarness(t, true)
 	root, _ := filepath.EvalSymlinks(t.TempDir())
@@ -136,7 +153,7 @@ func TestReviewStartClaudeInteractive(t *testing.T) {
 	first := "Read " + filepath.Join(dir, "rounds", "1", "prompt.md") + " and follow it."
 	wantCmd := fmt.Sprintf("'claude' 'review' '--model=claude-opus-5-5' '--root=%s' '--out=%s' '--settings=%s' '--session=SESS-NEW' '%s'",
 		root, filepath.Join(dir, "out"), filepath.Join(dir, "reviewer-settings.json"), first)
-	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || !reflect.DeepEqual(c.Args, []string{"SELF", "claude-review #1", wantCmd, root}) {
+	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || !reflect.DeepEqual(c.Args, []string{"SELF", "claude-review r1", wantCmd, root}) {
 		t.Fatalf("companion call = %v", c)
 	}
 	if s := readState(t, dir); s.Worker.Harness != "claude" || s.Worker.Model != "claude-opus-5-5" || s.Session != "SESS-NEW" || !s.Interactive {
@@ -431,7 +448,7 @@ func TestReviewStartChangeSpawnsCompanion(t *testing.T) {
 	if s := readState(t, dir); s.Change != "add-x" || s.Base != "" || s.Worker.Harness != "codex" {
 		t.Fatalf("worker.json = %+v", s)
 	}
-	if h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "add-x · codex-plan #1" {
+	if h.ctl.Calls[0].Method != "NewCompanion" || h.ctl.Calls[0].Args[1] != "add-x · codex-plan r1" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
 	if !strings.Contains(h.out.String(), `"companion":"COMP-1"`) || !strings.Contains(h.out.String(), `"started":true`) {
@@ -808,7 +825,7 @@ func TestReviewStartPlanCompanionNameClaude(t *testing.T) {
 	if code := h.env.ReviewStart(context.Background(), []string{"--change", "add-x", "--reviewer", "claude"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-x · claude-plan #1" {
+	if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-x · claude-plan r1" {
 		t.Fatalf("calls = %v", h.ctl.Calls)
 	}
 	for _, m := range h.ctl.Methods() {
@@ -834,7 +851,7 @@ func TestReviewStartForNamesDiffCompanion(t *testing.T) {
 			if !reflect.DeepEqual(*seen, []string{h.env.Cwd, "main"}) {
 				t.Fatalf("collect args = %q", *seen)
 			}
-			if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-auth · codex-review #1" {
+			if c := h.ctl.Calls[0]; c.Method != "NewCompanion" || c.Args[1] != "add-auth · codex-review r1" {
 				t.Fatalf("calls = %v", h.ctl.Calls)
 			}
 			dir := filepath.Join(root, ".agk", "reviews", "20261105-100000")

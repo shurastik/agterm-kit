@@ -42,40 +42,6 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNumber(t *testing.T) {
-	root := t.TempDir()
-	t0 := time.Date(2026, 11, 5, 9, 0, 0, 0, time.Local)
-	var dirs []string
-	for i := 0; i < 3; i++ {
-		d, err := New(root, Reviews, t0.Add(time.Duration(i)*time.Minute))
-		if err != nil {
-			t.Fatal(err)
-		}
-		dirs = append(dirs, d)
-	}
-	same, _ := New(root, Reviews, t0.Add(2*time.Minute)) // collision suffix -2 sorts after its base
-	os.WriteFile(filepath.Join(root, ".agk", "reviews", ".DS_Store"), nil, 0o644)
-	for i, d := range append(dirs, same) {
-		n, err := Number(d)
-		if err != nil || n != i+1 {
-			t.Errorf("Number(%s) = %d, %v; want %d", filepath.Base(d), n, err, i+1)
-		}
-	}
-	// A newer run does not renumber an older one.
-	New(root, Reviews, t0.Add(time.Hour))
-	if n, _ := Number(dirs[1]); n != 2 {
-		t.Errorf("older run renumbered to %d", n)
-	}
-	if _, err := Number(filepath.Join(root, ".agk", "reviews", "missing")); err == nil {
-		t.Error("unknown dir must error")
-	}
-	// Numbering is per kind.
-	ap, _ := New(root, Applies, t0.Add(2*time.Hour))
-	if n, err := Number(ap); err != nil || n != 1 {
-		t.Errorf("first apply run = %d, %v; want 1", n, err)
-	}
-}
-
 func TestRoot(t *testing.T) {
 	root := t.TempDir()
 	d, _ := New(root, Applies, time.Now())

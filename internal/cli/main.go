@@ -13,7 +13,8 @@ Usage:
                                   <harness>-review companion, an interactive reviewer session you can
                                   talk to; prints {"companion","dir","started"}.
                                   --for names the OpenSpec change NAME the diff implements: the
-                                  companion becomes "NAME · <harness>-review #N"; the review is the same.
+                                  companion becomes "NAME · <harness>-review r<k>" (k is the round; send
+                                  renames it); the review is the same.
                                   --change reviews the planning artifacts of OpenSpec change NAME
                                   (and the main specs its deltas touch) instead of a diff.
                                   Outside agterm the review runs inline (companion null).

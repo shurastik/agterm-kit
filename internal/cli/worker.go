@@ -47,15 +47,24 @@ var (
 	reviewerWorker = workerRole{"reviewer", "start a new review"}
 )
 
-// companionName is the sidebar name of a worker companion: <harness>-<kind> #N,
+// companionName is the sidebar name of a worker companion: <harness>-<kind> r<round>,
 // prefixed with "<change> · " when the change is known. The name reaches
 // agtermctl as its own argv element, so the separator needs no quoting.
-func companionName(change, harness, kind string, num int) string {
-	name := fmt.Sprintf("%s-%s #%d", harness, kind, num)
+func companionName(change, harness, kind string, round int) string {
+	name := fmt.Sprintf("%s-%s r%d", harness, kind, round)
 	if change == "" {
 		return name
 	}
 	return change + " · " + name
+}
+
+// renameCompanion renames a worker's companion after a round was typed into
+// it. The name is cosmetic and the round already reached the worker, so a
+// failure is a warning and changes nothing else.
+func (e *Env) renameCompanion(ctx context.Context, w workerRole, id, name string) {
+	if err := e.Ctl.Rename(ctx, id, name); err != nil {
+		fmt.Fprintf(e.Stderr, "agk: warning: rename %s %s: %v\n", w.name, id, err)
+	}
 }
 
 // markStarted records that round k was seen active, so a later idle status

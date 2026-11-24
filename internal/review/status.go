@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// Label identifies a review round in info lines: "codex #4 r2".
+// Label identifies a review round in info lines: "codex r2".
 type Label struct {
-	Harness    string
-	Num, Round int // 0 when unknown
+	Harness string
+	Round   int // 0 when unknown
 }
 
 // String is the info-line prefix; unknown parts are left out, and an unknown
@@ -18,11 +18,8 @@ func (l Label) String() string {
 	if s == "" {
 		s = "review"
 	}
-	if l.Num > 0 {
-		s += fmt.Sprintf(" #%d", l.Num)
-		if l.Round > 0 {
-			s += fmt.Sprintf(" r%d", l.Round)
-		}
+	if l.Round > 0 {
+		s += fmt.Sprintf(" r%d", l.Round)
 	}
 	return s
 }

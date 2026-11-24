@@ -12,8 +12,8 @@ description: >
 
 # agk review
 
-`agk` runs the reviewer read-only on the diff, shows it in a `<change> · <harness>-review #N`
-companion (`<harness>-review #N` when no change is named) under this session, and hands back
+`agk` runs the reviewer read-only on the diff, shows it in a `<change> · <harness>-review r<k>`
+companion (`<harness>-review r<k>` when no change is named) under this session, and hands back
 structured findings, one round at a time. Inside agterm the companion
 is the harness's own interactive session: the user can read its reasoning and answer its questions
 there. The reviewer writes its findings to a file, and `agk review wait` validates them. The
@@ -26,8 +26,8 @@ companion stays open between rounds; you close it when the loop is over.
    agk review start --base <base> [--for <change>]   # base defaults to main; use the branch the work forked from
    ```
    Pass `--for <change>` when the diff is the implementation of an OpenSpec change you know: it
-   only names the companion `<change> · <harness>-review #N`, the review itself is the same. Leave
-   it out otherwise; the companion is then `<harness>-review #N`.
+   only names the companion `<change> · <harness>-review r<k>`, the review itself is the same. Leave
+   it out otherwise; the companion is then `<harness>-review r<k>`.
    - stdout: `{"companion":"<id>","dir":"<run dir>","started":true}`. Keep `dir` for every later
      step. `"started":false` means the reviewer did not report in 60 s (usually a folder-trust or
      login prompt in its companion): stderr shows the last screen lines. Tell the user to answer it
@@ -116,7 +116,7 @@ skill does this after writing a change):
 agk review start --change <change>   # not together with --base or --for
 ```
 
-Its companion is named `<change> · <harness>-plan #N`, so it does not look like a code review of
+Its companion is named `<change> · <harness>-plan r<k>`, so it does not look like a code review of
 the same change.
 
 The scope is every file of `openspec/changes/<change>/` plus the current main spec of each

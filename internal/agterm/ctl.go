@@ -156,11 +156,18 @@ func (c *CLI) Info(ctx context.Context, target, markdown string) error {
 	return err
 }
 
+// Rename sets the sidebar name of target.
+func (c *CLI) Rename(ctx context.Context, target, name string) error {
+	_, err := c.runOK(ctx, "session", "rename", name, "--target", target)
+	return err
+}
+
 // Ctl is the slice of agterm that agk uses.
 type Ctl interface {
 	NewCompanion(ctx context.Context, parent, name, command, cwd string) (string, error)
 	Status(ctx context.Context, target, state string) error
 	Info(ctx context.Context, target, markdown string) error
+	Rename(ctx context.Context, target, name string) error
 	Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error)
 	Close(ctx context.Context, target string) error
 	Type(ctx context.Context, target, text string) error

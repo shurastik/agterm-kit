@@ -4,6 +4,7 @@ package agtermtest
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,8 @@ type Fake struct {
 	CompanionErr error
 	StatusErr    error
 	InfoErr      error
+	ClearInfoErr error
+	TintErr      error
 	RenameErr    error
 	WaitStatus   string
 	WaitErr      error
@@ -55,6 +58,9 @@ type Fake struct {
 	OnType func(target, text string)
 	// OnStatus, when set, decides each Status call's error (overrides StatusErr).
 	OnStatus func(state string) error
+	// OnInfo, when set, decides each Info call's error (overrides InfoErr); it
+	// runs after the call is recorded and may block.
+	OnInfo func() error
 	// OnWait, when set, runs before Wait returns (e.g. to write result.json).
 	OnWait func()
 	// OnNewCompanion, when set, runs before NewCompanion returns.
@@ -99,9 +105,23 @@ func (f *Fake) Status(ctx context.Context, target, state string) error {
 	return f.StatusErr
 }
 
-func (f *Fake) Info(ctx context.Context, target, markdown string) error {
-	f.record(ctx, "Info", target, markdown)
+// Info records target, the markdown and the hide-after in whole seconds.
+func (f *Fake) Info(ctx context.Context, target, markdown string, hideAfter time.Duration) error {
+	f.record(ctx, "Info", target, markdown, strconv.Itoa(int(hideAfter/time.Second)))
+	if f.OnInfo != nil {
+		return f.OnInfo()
+	}
 	return f.InfoErr
+}
+
+func (f *Fake) ClearInfo(ctx context.Context, target string) error {
+	f.record(ctx, "ClearInfo", target)
+	return f.ClearInfoErr
+}
+
+func (f *Fake) Tint(ctx context.Context, target, color string) error {
+	f.record(ctx, "Tint", target, color)
+	return f.TintErr
 }
 
 func (f *Fake) Rename(ctx context.Context, target, name string) error {

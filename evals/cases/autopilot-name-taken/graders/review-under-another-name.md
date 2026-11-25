@@ -4,4 +4,4 @@ target: {source: file, path: agk-calls.log}
 flags: m
 match: not_contains
 ---
-^agk review start --change add-widget$
+^agk review start --change add-widget( --autopilot)?$

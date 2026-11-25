@@ -293,6 +293,44 @@ it notes before `/agk-archive` closes it.
 
 Invoke it by name only; a plain request to build something never starts it.
 
+### Autopilot marks in the sidebar
+
+An autopilot run marks its rows in agterm, so you see at a glance which session is under it and
+which companions it started. Inside agterm only; everywhere else the commands below do nothing.
+
+```bash
+agk autopilot on     # {"session":"<id>","marked":true}
+agk autopilot off    # {"session":"<id>","marked":false}
+agk apply start add-json-export --autopilot
+agk review start --base main --for add-json-export --autopilot
+```
+
+- **The main session.** `agk autopilot on` sets an info line `🤖 autopilot` on the session you run it
+  in (`$AGTERM_SESSION_ID`); `agk autopilot off` clears it. The skill runs `on` before it writes
+  anything, again right after every verify run, and `off` before its final report on every exit,
+  finished or stopped. A `needs-human` it waits through keeps the mark.
+- **It expires by itself.** The line hides itself after 20 minutes, so a crashed run does not leave
+  it behind. While the autopilot is on, `agk apply wait`, `agk review wait` and the two `send`
+  commands of a `--autopilot` run set it again (once when they start and then about once a minute
+  while they wait), so a worker that runs for hours keeps it up. After `off`, or once the 20 minutes
+  ran out, they set nothing; the live state is a small file per session under
+  `$XDG_STATE_HOME/agk/autopilot/` (default `~/.local/state/agk/autopilot/`), outside the repository.
+- **The companions.** A run started with `--autopilot` names its companion with a `🤖 ` prefix
+  (`🤖 add-json-export · claude-apply r1`) and tints its sidebar icon purple. `agk apply send` and
+  `agk review send` keep the prefix when they rename the companion for the next round, and the
+  companion keeps both marks until it is closed; `agk autopilot off` leaves them alone. The run
+  records the flag and your session in its `worker.json`.
+- **Best effort.** A mark that agterm refuses is a warning on stderr; stdout and the exit code stay
+  those of the command, and `agk autopilot on` then prints `"marked": false`. Outside agterm
+  (`AGTERM_ENABLED` unset) `agk autopilot on|off` calls nothing and prints
+  `{"session":null,"marked":false}`.
+
+Two limits. A gap of more than 20 minutes without an `agk` command of the run (a very long verify
+that the skill does not renew from the inside) drops the line and the live state for the rest of
+the run. And a background `agk apply wait` / `agk review wait` that outlives a crashed agent keeps
+the line up until it ends, at most its `--timeout` plus 20 minutes: it cannot tell a crashed caller
+from one that is still waiting.
+
 ## Worktree mode
 
 By default the applier works in the checkout you start it from. With worktree mode it gets a git

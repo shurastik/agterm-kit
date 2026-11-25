@@ -61,7 +61,7 @@ func TestReviewStartHelpExitsZero(t *testing.T) {
 // Every usage text documents the plan review mode, and `review start -h`
 // lists the flag.
 func TestUsageDocumentsChange(t *testing.T) {
-	const line = "agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]"
+	const line = "agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]] [--autopilot]"
 	for name, text := range map[string]string{"usage": usage, "review usage": reviewUsage} {
 		if !strings.Contains(text, line) {
 			t.Errorf("%s lacks %q", name, line)
@@ -77,7 +77,7 @@ func TestUsageDocumentsChange(t *testing.T) {
 // Every usage text documents the worktree flags and the new stdout keys of
 // `apply start`.
 func TestUsageDocumentsWorktreeMode(t *testing.T) {
-	const line = "agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]"
+	const line = "agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull] [--autopilot]"
 	for name, text := range map[string]string{"usage": usage, "apply usage": applyUsage} {
 		if !strings.Contains(text, line) {
 			t.Errorf("%s lacks %q", name, line)

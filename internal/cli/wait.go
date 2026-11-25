@@ -43,6 +43,8 @@ func (e *Env) ReviewWait(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	e.armBeat(run.state.Autopilot, run.state.AutopilotSession)
+	e.beatNow(ctx)
 	k, err := rundir.Round(run.dir)
 	if err != nil {
 		return e.errorf("%v", err)

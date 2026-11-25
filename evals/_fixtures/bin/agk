@@ -13,6 +13,8 @@
 # applier: apply-round-<k>.json is the round's report (done by default, which
 # also writes the code file widget.go), apply-wait-<k>.json a status `apply wait`
 # plays once first (needs-human, cancelled).
+# `autopilot on|off` logs its call and prints the inline answer; `--autopilot` on
+# the two starts is accepted and logged.
 # `sync` and `finish` play the worktree commands on the workspace repository
 # standing on the change's branch (see scaffold-archive.sh --worktree).
 set -uo pipefail
@@ -107,6 +109,7 @@ case "$cmd $sub" in
       --for) need --for $#; for_change="${2:-}"; given_for=1; shift 2 ;;
       --for=*) for_change="${1#--for=}"; given_for=1; shift ;;
       --reviewer) need --reviewer $#; shift 2 ;;
+      --autopilot) shift ;; # the mark is cosmetic: the log of the call is all the graders need
       *) shift ;;
     esac
   done
@@ -247,6 +250,12 @@ case "$cmd $sub" in
   dir="$(any_dir "${3:-}")" || exit 1
   note "close: last verdict $(cat "$dir/last-verdict" 2>/dev/null || echo none)"
   ;;
+"autopilot "*)
+  # The marks of the real command need agterm; the stand-in plays the inline
+  # answer and leaves its argv in the log for the graders.
+  [ $# -eq 2 ] && { [ "$2" = on ] || [ "$2" = off ]; } || die "usage: agk autopilot on|off"
+  printf '{"session":null,"marked":false}\n'
+  ;;
 "sync "*)
   shift
   change=""
@@ -299,7 +308,7 @@ case "$cmd $sub" in
   while [ $# -gt 0 ]; do
     case "$1" in
       --applier) need --applier $#; shift 2 ;;
-      --applier=*|--worktree|--no-worktree|--no-pull) shift ;;
+      --applier=*|--worktree|--no-worktree|--no-pull|--autopilot) shift ;;
       -*) die "unknown flag $1" ;;
       *) [ -z "$change" ] || die "usage: agk apply start <change>"; change="$1"; shift ;;
     esac

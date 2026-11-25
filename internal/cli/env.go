@@ -47,6 +47,9 @@ type Env struct {
 	Now          func() time.Time
 	Executable   func() (string, error)
 	Cwd          string
+	// beat, when armed by a command on an autopilot run, keeps the autopilot
+	// line of the run's session alive while the command waits.
+	beat *heartbeat
 
 	// Machine wiring for agk setup.
 	Home      string

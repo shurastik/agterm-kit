@@ -70,8 +70,8 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `branch-in-main-checkout` | `agk-archive` | Change branch checked out in the main checkout |
 | `branch-without-base` | `agk-archive` | Branch without a recorded base |
 | `autopilot-plain-request` | `agk-autopilot` | Plain build request |
-| `autopilot-no-openspec-skills` | `agk-autopilot` | Project without OpenSpec skills |
-| `autopilot-happy-path` | `agk-autopilot` | Ambiguous idea, Entry format, Log reviewed with the plan, Plan approved, Findings go to the applier, Finished run |
+| `autopilot-no-openspec-skills` | `agk-autopilot` | Project without OpenSpec skills, No mark without the preconditions |
+| `autopilot-happy-path` | `agk-autopilot` | Ambiguous idea, Entry format, Log reviewed with the plan, Plan approved, Findings go to the applier, Finished run, Mark on from the start, Mark renewed after verify, Mark off on a finished run |
 | `autopilot-name-taken` | `agk-autopilot` | Name already taken |
 | `autopilot-disputed-finding` | `agk-autopilot` | Disputed plan finding |
 | `autopilot-blocked` | `agk-autopilot` | Blocked on tasks |
@@ -79,8 +79,8 @@ arguments go to `claude plugin eval`. Reports land in `evals/cases/results/` (gi
 | `autopilot-verify-warning` | `agk-autopilot` | Decision written after verify |
 | `autopilot-changed-during-verify` | `agk-autopilot` | Code changed during verify |
 | `autopilot-review-limit` | `agk-autopilot` | Code review does not converge |
-| `autopilot-needs-human` | `agk-autopilot` | Permission prompt in a companion |
-| `autopilot-cancelled` | `agk-autopilot` | Companion closed |
+| `autopilot-needs-human` | `agk-autopilot` | Permission prompt in a companion, Needs-human keeps the mark |
+| `autopilot-cancelled` | `agk-autopilot` | Companion closed, Mark off on a stop |
 | `autopilot-worktree` | `agk-autopilot` | Log follows the worktree, Plan commit in worktree mode |
 | (this table) | `agk-autopilot` | Suite covers the skill |
 
@@ -123,6 +123,11 @@ review) and then to run the `agk-archive` skill.
   `sync-conflict` marker, and refuses uncommitted files and a branch without `agkBase` like the real
   command. `finish <change>` refuses uncommitted files and a change not archived in the committed
   tree, exits 1 on a `finish-fail` marker (the base moved) and otherwise prints its success JSON.
+- `agk autopilot on|off` logs its call and prints the inline answer `{"session":null,"marked":false}`
+  (a usage error for anything else); `--autopilot` on `review start` and `apply start` is accepted and
+  stays in the logged call. The autopilot cases grade those lines: `on` first, `--autopilot` on every
+  start, `on` right after each `verify`, `off` after the reviewers are closed or on the stop and
+  nothing after it, and no `off` between a `needs-human` and the wait that follows it.
 - `revdiff` logs its argv to the same file, notes whether `--only` covers every change file and
   whether the description file is the run dir's `revdiff-description.md`, and prints the case's
   `revdiff-<n>.txt` for launch n (nothing = the user quit without annotations).

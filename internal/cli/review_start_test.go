@@ -93,7 +93,7 @@ func TestReviewStartSpawnsCompanion(t *testing.T) {
 	want := []agtermtest.Call{
 		{Method: "NewCompanion", Args: []string{"SELF", "codex-review r1", wantCmd, root}},
 		{Method: "Wait", Args: []string{"COMP-1", "active,completed,blocked", "1m0s"}},
-		{Method: "Info", Args: []string{"COMP-1", "codex r1: reviewing"}},
+		{Method: "Info", Args: []string{"COMP-1", "codex r1: reviewing", "0"}},
 	}
 	if !reflect.DeepEqual(h.ctl.Calls, want) {
 		t.Fatalf("calls = %v\nwant %v", h.ctl.Calls, want)

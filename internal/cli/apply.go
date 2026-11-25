@@ -42,6 +42,11 @@ type applyState struct {
 	// only then does `agk apply wait` read turn.json. Codex runs and runs of
 	// an older agk decide from the agent status alone.
 	TurnHooks bool `json:"turn_hooks,omitempty"`
+	// Autopilot marks a run started by the autopilot with --autopilot, and
+	// AutopilotSession the agterm session whose autopilot line its waits
+	// refresh ("" outside agterm).
+	Autopilot        bool   `json:"autopilot,omitempty"`
+	AutopilotSession string `json:"autopilot_session,omitempty"`
 }
 
 var changeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -64,7 +69,7 @@ type applyStart struct {
 }
 
 const applyUsage = `Usage:
-  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
+  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull] [--autopilot]
   agk apply wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 3600
   agk apply send <run-dir> (<file> | --stdin) [--timeout SECONDS]   SECONDS defaults to 600
   agk apply close <run-dir>
@@ -132,12 +137,13 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	worktreeOn := fs.Bool("worktree", false, "implement in a git worktree of its own (overrides the config)")
 	worktreeOff := fs.Bool("no-worktree", false, "implement in the current checkout (overrides the config)")
 	noPull := fs.Bool("no-pull", false, "worktree mode: do not pull the base branch first")
+	autopilot := fs.Bool("autopilot", false, "mark the run as started by the autopilot (🤖 companion name, purple icon, line refreshed by its waits)")
 	pos, code, ok := parseInterleaved(fs, args)
 	if !ok {
 		return code
 	}
 	if len(pos) != 1 {
-		return e.errorf("usage: agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]")
+		return e.errorf("usage: agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull] [--autopilot]")
 	}
 	change := pos[0]
 	if !changeName.MatchString(change) {
@@ -190,6 +196,9 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 		return e.errorf("create run dir: %v", err)
 	}
 	st := applyState{Worker: w, Change: change}
+	if *autopilot {
+		st.Autopilot, st.AutopilotSession = true, parent
+	}
 	files, err := e.applierFiles(dir, w)
 	if err != nil {
 		return e.errorf("write applier files: %v", err)
@@ -221,9 +230,12 @@ func (e *Env) ApplyStart(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
-	id, err := e.startCompanion(ctx, parent, companionName(change, w.Harness, "apply", 1), cmd, root, dir)
+	id, err := e.startCompanion(ctx, parent, companionName(change, w.Harness, "apply", 1, st.Autopilot), cmd, root, dir)
 	if err != nil {
 		return e.errorf("%v", err)
+	}
+	if st.Autopilot {
+		e.tintCompanion(ctx, applierWorker, id)
 	}
 	started := e.handshake(ctx, applierWorker, id)
 	if started {
@@ -307,6 +319,8 @@ func (e *Env) ApplyWait(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	e.armBeat(run.state.Autopilot, run.state.AutopilotSession)
+	e.beatNow(ctx)
 	companion, err := readCompanion(run.dir)
 	if err != nil {
 		return e.errorf("%v", err)
@@ -382,6 +396,8 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	e.armBeat(run.state.Autopilot, run.state.AutopilotSession)
+	e.beatNow(ctx)
 	var msg []byte
 	if *stdin {
 		msg, err = io.ReadAll(e.Stdin)
@@ -436,7 +452,7 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 	if started {
 		markStarted(run.dir, k)
 	}
-	e.renameCompanion(ctx, applierWorker, companion, companionName(run.state.Change, run.state.Worker.Harness, "apply", k))
+	e.renameCompanion(ctx, applierWorker, companion, companionName(run.state.Change, run.state.Worker.Harness, "apply", k, run.state.Autopilot))
 	return e.printJSON(sendRound{Round: k, Started: &started})
 }
 

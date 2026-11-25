@@ -49,15 +49,33 @@ var (
 	reviewerWorker = workerRole{"reviewer", "start a new review"}
 )
 
+// autopilotPrefix marks the name of an autopilot run's companion.
+const autopilotPrefix = "🤖 "
+
+// autopilotTint is the sidebar icon color of an autopilot run's companion.
+const autopilotTint = "purple"
+
 // companionName is the sidebar name of a worker companion: <harness>-<kind> r<round>,
-// prefixed with "<change> · " when the change is known. The name reaches
-// agtermctl as its own argv element, so the separator needs no quoting.
-func companionName(change, harness, kind string, round int) string {
+// prefixed with "<change> · " when the change is known, and with a robot for
+// an autopilot run. The name reaches agtermctl as its own argv element, so the
+// separator needs no quoting.
+func companionName(change, harness, kind string, round int, autopilot bool) string {
 	name := fmt.Sprintf("%s-%s r%d", harness, kind, round)
-	if change == "" {
-		return name
+	if change != "" {
+		name = change + " · " + name
 	}
-	return change + " · " + name
+	if autopilot {
+		name = autopilotPrefix + name
+	}
+	return name
+}
+
+// tintCompanion tints the icon of a new autopilot companion. The tint is
+// cosmetic, so a failure is a warning and changes nothing else.
+func (e *Env) tintCompanion(ctx context.Context, w workerRole, id string) {
+	if err := e.Ctl.Tint(ctx, id, autopilotTint); err != nil {
+		fmt.Fprintf(e.Stderr, "agk: warning: tint %s %s: %v\n", w.name, id, err)
+	}
 }
 
 // renameCompanion renames a worker's companion after a round was typed into
@@ -110,6 +128,7 @@ var pollSlice = 5 * time.Second
 // must not hide a spent budget from the caller.
 func (e *Env) waitPolling(ctx context.Context, companion string, until []string, left time.Duration, done func() bool) (status string, err error, found bool, rest time.Duration) {
 	for {
+		e.beatNow(ctx)
 		slice := min(pollSlice, left)
 		status, err = e.Ctl.Wait(ctx, companion, until, slice)
 		if !errors.Is(err, agterm.ErrTimeout) {
@@ -278,9 +297,14 @@ func (e *Env) typeWhenIdle(ctx context.Context, w workerRole, companion, line, w
 	// reads, the last status query) by the effective deadline: start + timeout,
 	// or the caller's deadline when that is earlier.
 	wctx, end := ctx, time.Time{}
-	if settle == nil {
+	switch {
+	case settle == nil && e.beat != nil:
+		// An autopilot run keeps its line alive: wait in slices, with a done
+		// check that never fires, so the long wait beats like any other.
+		status, err, _, _ = e.waitPolling(ctx, companion, until, timeout, func() bool { return false })
+	case settle == nil:
 		status, err = e.Ctl.Wait(ctx, companion, until, timeout)
-	} else {
+	default:
 		end = e.Now().Add(timeout)
 		if !deadline.IsZero() && deadline.Before(end) {
 			end = deadline

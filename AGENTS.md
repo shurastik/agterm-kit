@@ -62,7 +62,7 @@ documented for users in [README.md](README.md); do not duplicate them here. Dev 
 The commands, for an agent driving `agk` (`agk --help` has the flags):
 
 ```bash
-agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
+agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull] [--autopilot]
                                              # applier companion; prints {"companion","dir","started","worktree","pulled"};
                                              # worktree mode ([applier] worktree = true): pull the base --ff-only
                                              # (--no-pull skips), commit the plan, run in .worktrees/<change>
@@ -71,7 +71,7 @@ agk apply wait <dir>                         # {"status":"done|blocked|needs-hum
                                              # work in flight is a pause: running + "reason":"background"
 agk apply send <dir> (<file>|--stdin)        # next round with findings/notes once the turn is over
 agk apply close <dir>
-agk review start [--base main [--for <change>] | --change <change>] [--reviewer H[:M]]
+agk review start [--base main [--for <change>] | --change <change>] [--reviewer H[:M]] [--autopilot]
                                              # reviewer companion; prints {"companion","dir","started"}
                                              # (inline: {"companion":null,"dir"});
                                              # --change reviews an OpenSpec change's plan, not a diff
@@ -88,6 +88,10 @@ agk review fresh <dir>                       # {"fresh":true|false,"round":K,"me
                                              # merge-base uses merge-base(run base, HEAD); a plan run, a round without a
                                              # fingerprint, a merge base missing from the repo or a bad dir exits 1
 agk review close <dir>
+agk autopilot on|off                         # sidebar mark of the calling agterm session: on sets the info line
+                                             # "🤖 autopilot" (1200 s expiry, refreshed by the waits and sends of
+                                             # --autopilot runs while it is live), off clears it; prints
+                                             # {"session":"<id>"|null,"marked":<bool>}; no-op outside agterm
 agk sync <change> [--no-pull]                # worktree mode: pull the base --ff-only (skipped without upstream or
                                              # --no-pull), rebase branch <change> onto it in .worktrees/<change>;
                                              # {"change","base","pulled","rebased","head"}; a conflict aborts, exit 1

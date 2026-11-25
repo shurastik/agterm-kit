@@ -39,6 +39,15 @@ Check these in order, before writing anything; stop at the first that fails:
 Then note the branch checked out now (`git rev-parse --abbrev-ref HEAD`): it is the code review
 base when the applier runs in the main checkout.
 
+Last, before anything is written, mark this session as run by the autopilot:
+
+```bash
+agk autopilot on
+```
+
+It sets an info line on this session's sidebar row (and nothing outside agterm); see **Autopilot
+mark**. A run that stopped on a precondition above ran no `agk autopilot on`.
+
 ## Overrides
 
 These replace every "ask the user", "show the user" and "stop" of the skills this one follows:
@@ -54,9 +63,29 @@ These replace every "ask the user", "show the user" and "stop" of the skills thi
   the loop, send no round 6; stop with the report (see **Stops**).
 - **Human-only stops.** Turn to the user only for `needs-human`, a `"started": false` start or send,
   `cancelled`, a round limit, or an `agk` error you cannot fix (exit 1).
+- **Autopilot mark.** Pass `--autopilot` to every `agk review start` and `agk apply start` of the
+  run, in every step (the plan reviewer, the applier, the code reviewer, the worktree plan reviewer
+  of **Applier blocked**), so their companions carry the mark and their waits keep the line alive.
+  See **Autopilot mark**.
 - **No commit, push, archive or merge by you.** Never run `git commit`, `git push`, `agk finish`
   or an archive. The plan commit that `agk apply start` makes in worktree mode is the only commit of
   a run.
+
+## Autopilot mark
+
+The mark makes the sidebar show which session an autopilot drives and which companions it started.
+It is cosmetic: a failed `agk autopilot on` or `agk autopilot off` (a warning, `"marked": false`)
+never stops or changes the run.
+
+- `agk autopilot on` once after the preconditions (step 0), and again right after every
+  `openspec-verify-change` run (step 5): the line expires after 20 minutes and only `agk` commands
+  of an autopilot run refresh it, so the long verify is the one gap the mark would not survive.
+- `--autopilot` on every `agk review start` and `agk apply start` (see **Overrides**). Their
+  `agk apply wait`, `agk review wait` and `send` commands then refresh the line while they wait.
+- `agk autopilot off` on **every exit**, as the last `agk` command before the final report: on the
+  finished path after closing the reviewers (step 6), and on every stop (see **Stops**).
+- A `needs-human` you wait on again is not an exit: the mark stays on while you tell the user and
+  wait again.
 
 ## Decisions
 
@@ -100,6 +129,7 @@ Then create `decisions.md` as described above.
 Follow `agk-propose` step 2 (the plan review loop, including the checksum manifest right before
 every `agk review start --change` and `agk review send`), with the overrides:
 
+- Start the plan reviewer with `agk review start --change <change> --autopilot`.
 - Findings you agree with: fix them in the planning artifacts. Findings you disagree with, and a
   `needs-attention` verdict without findings: decide, append a decision, and name it in the note of
   the next `agk review send`.
@@ -112,7 +142,7 @@ included), the plan is done: go to step 3.
 
 ## 3. Implement
 
-Follow the `agk-apply` skill: `agk apply start <change>`, then the wait. `needs-human` means the
+Follow the `agk-apply` skill: `agk apply start <change> --autopilot`, then the wait. `needs-human` means the
 applier waits for the user (a permission or trust prompt, a question): tell the user to answer in
 the applier companion, never answer it yourself, and run the wait again.
 
@@ -146,8 +176,8 @@ The report names `problem` and `artifact`. Read the competing readings it names,
    applier gets the note:
    - Main checkout: `agk review send <plan dir> --note <file>` on the plan reviewer still open
      from step 2, with the manifest right before it, then wait and act on the round as in step 2.
-   - Worktree: the first planning edit starts `agk review start --change <change>` from the
-     worktree (manifest first), the later ones `agk review send` on that reviewer. Its first round
+   - Worktree: the first planning edit starts `agk review start --change <change> --autopilot`
+     from the worktree (manifest first), the later ones `agk review send` on that reviewer. Its first round
      reviews the whole plan again, which is fine. It has its own round limit of 5.
 4. After the plan round approves the current files, deliver the decision with `agk apply send <dir>
    <file>`: a note naming the decision (`D4`) and what to do, then wait again.
@@ -159,7 +189,7 @@ Follow the `agk-review` skill. The base is `branch.<change>.agkBase` in worktree
 the first `done` report, from the root of the checkout the applier works in:
 
 ```bash
-agk review start --base <base> --for <change>
+agk review start --base <base> --for <change> --autopilot
 ```
 
 `nothing to review` (exit 1) means the applier wrote no code: report it and stop. Keep the code
@@ -185,7 +215,8 @@ On each completed round (`review.json`):
 ## 5. Verify
 
 Follow the project's `openspec-verify-change` skill for `<change>`, from the root of the checkout the
-applier works in, without asking. Then:
+applier works in, without asking. Right after each verify run, before anything else, run `agk
+autopilot on` again (see **Autopilot mark**). Then:
 
 - **CRITICAL** issues: send them to the applier with `agk apply send` and wait for its report, then
   `agk review send` on the code reviewer with a note saying what was fixed (step 4), then run verify
@@ -212,12 +243,19 @@ agk review close <code reviewer dir>
 agk review close <plan reviewer dir>      # whichever plan reviewer is still open
 ```
 
+Then turn the mark off, the last `agk` command of the run:
+
+```bash
+agk autopilot off
+```
+
 Leave the applier open: the user can still send it notes before `/agk-archive` closes it. Close
-nothing else, and never archive, commit, push or run `agk finish`.
+nothing else, and never archive, commit, push or run `agk finish`. The applier and the reviewers
+keep their `🤖` name and purple icon until they are closed.
 
 ## Final report
 
-End every run, finished or stopped, with a report in chat (not a file):
+End every run, finished or stopped, with a report in chat (not a file), after `agk autopilot off`:
 
 1. The change name, and whether the run finished or why it stopped.
 2. The decisions of `decisions.md`, `[scope]` first, then `[impl]`, one line each with its `D<n>`
@@ -232,7 +270,8 @@ End every run, finished or stopped, with a report in chat (not a file):
 
 ## Stops
 
-A stopped run closes nothing: the user continues from the open companions. Report as above, and:
+A stopped run closes nothing: the user continues from the open companions. Run `agk autopilot
+off` first (the line must not claim an autopilot that has stopped), then report as above, and:
 
 - `cancelled` (a companion was closed): start no new reviewer or applier; say which one was closed.
 - A round limit (a reviewer's round 5 still has findings, or needs another round): send no round 6;

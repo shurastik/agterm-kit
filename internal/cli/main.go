@@ -8,7 +8,7 @@ import (
 const usage = `agk - agterm workflow kit
 
 Usage:
-  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]
+  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]] [--autopilot]
                                   Review changes since the merge base of REF (default main) in a
                                   <harness>-review companion, an interactive reviewer session you can
                                   talk to; prints {"companion","dir","started"}.
@@ -31,7 +31,7 @@ Usage:
                                   current round's fingerprint; prints {"fresh":true|false,"round":K}.
                                   A diff review only; an empty scope is not fresh.
   agk review close <run-dir>      Close the reviewer companion (undo restores it).
-  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull]
+  agk apply start <change> [--applier H[:M]] [--worktree | --no-worktree] [--no-pull] [--autopilot]
                                   Start the applier for an OpenSpec change in a <harness>-apply
                                   companion (interactive, autonomous); prints
                                   {"companion","dir","started","worktree","pulled"}. Outside agterm
@@ -50,6 +50,12 @@ Usage:
                                   Start the next round with findings or notes once the applier's
                                   turn is over (default 600 s); prints {"round":K}.
   agk apply close <run-dir>       Close the applier companion (undo restores it).
+  agk autopilot on|off            Mark the calling agterm session as run by the autopilot: "on" sets
+                                  its info line (🤖 autopilot, hides itself after 20 minutes) and
+                                  "off" clears it; prints {"session":"<id>"|null,"marked":<bool>}.
+                                  The --autopilot flag of review start and apply start puts the same
+                                  mark on a companion (🤖 name prefix, purple icon) and lets the
+                                  waits of that run refresh the line. A no-op outside agterm.
   agk sync <change> [--no-pull]   In worktree mode: pull the base branch (--ff-only, skipped with
                                   --no-pull or without an upstream) and rebase the change's branch
                                   onto it, in .worktrees/<change>; needs a clean worktree. Prints
@@ -75,7 +81,7 @@ Exit codes: 0 ok, 1 error (2 and 3 are reserved).
 `
 
 const reviewUsage = `Usage:
-  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]]   REF defaults to main
+  agk review start [--base REF [--for NAME] | --change NAME] [--reviewer H[:M]] [--autopilot]   REF defaults to main
   agk review wait <run-dir> [--timeout SECONDS]   SECONDS defaults to 1800
   agk review send <run-dir> [--note FILE] [--timeout SECONDS]   SECONDS defaults to 600
   agk review fresh <run-dir>
@@ -96,6 +102,8 @@ func (e *Env) Main(ctx context.Context, args []string) int {
 		return e.reviewCmd(ctx, args[1:])
 	case "apply":
 		return e.applyCmd(ctx, args[1:])
+	case "autopilot":
+		return e.Autopilot(ctx, args[1:])
 	case "sync":
 		return e.Sync(ctx, args[1:])
 	case "finish":

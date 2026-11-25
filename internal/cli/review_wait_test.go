@@ -146,7 +146,7 @@ func TestReviewWaitValidOutputMidTurnCompletes(t *testing.T) {
 	}
 	assertCalls(t, h.ctl,
 		mainWait("30m0s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))", "0"}},
 	)
 	noStatus(t, h)
 }
@@ -457,7 +457,7 @@ func TestReviewWaitHalfRewrittenFileAfterUnconfirmedFixup(t *testing.T) {
 		t.Fatalf("stdout %q typed %q", h.out, typed(h))
 	}
 	assertCalls(t, h.ctl, activeBlocked("5s"), activeBlocked("5s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}})
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))", "0"}})
 }
 
 func TestReviewWaitPermissionDuringUnconfirmedFixup(t *testing.T) {
@@ -543,7 +543,7 @@ func TestReviewWaitRoundStartGate(t *testing.T) {
 	assertCalls(t, h.ctl,
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,blocked,completed", "30m0s"}},
 		mainWait("30m0s"),
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r1: **3** findings (^[1 high](color: \"orange\"))", "0"}},
 	)
 }
 

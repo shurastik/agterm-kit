@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type call struct {
@@ -115,10 +116,50 @@ func TestRenameError(t *testing.T) {
 
 func TestInfo(t *testing.T) {
 	s := &stubExec{stdout: "ok"}
-	if err := newCLI(s).Info(context.Background(), "C-1", "-codex: reviewing"); err != nil {
+	if err := newCLI(s).Info(context.Background(), "C-1", "-codex: reviewing", 0); err != nil {
 		t.Fatal(err)
 	}
 	assertArgs(t, s, []string{"session", "info", "--markdown", "--hide-after", "0", "--target", "C-1", "--", "-codex: reviewing"})
+}
+
+func TestInfoHideAfter(t *testing.T) {
+	s := &stubExec{stdout: "ok"}
+	if err := newCLI(s).Info(context.Background(), "S-1", "🤖 ^[autopilot](color: \"purple\")", 1200*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, s, []string{"session", "info", "--markdown", "--hide-after", "1200", "--target", "S-1", "--", "🤖 ^[autopilot](color: \"purple\")"})
+}
+
+func TestClearInfo(t *testing.T) {
+	s := &stubExec{stdout: "ok"}
+	if err := newCLI(s).ClearInfo(context.Background(), "S-1"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, s, []string{"session", "info", "--clear", "--target", "S-1"})
+}
+
+func TestClearInfoError(t *testing.T) {
+	s := &stubExec{code: 1, stderr: "no such session"}
+	err := newCLI(s).ClearInfo(context.Background(), "S-1")
+	if err == nil || !strings.Contains(err.Error(), "no such session") {
+		t.Fatalf("err = %v, want stderr in message", err)
+	}
+}
+
+func TestTint(t *testing.T) {
+	s := &stubExec{stdout: "ok"}
+	if err := newCLI(s).Tint(context.Background(), "C-1", "purple"); err != nil {
+		t.Fatal(err)
+	}
+	assertArgs(t, s, []string{"session", "tint", "purple", "--on", "icon", "--target", "C-1"})
+}
+
+func TestTintError(t *testing.T) {
+	s := &stubExec{code: 1, stderr: "bad color"}
+	err := newCLI(s).Tint(context.Background(), "C-1", "nope")
+	if err == nil || !strings.Contains(err.Error(), "bad color") {
+		t.Fatalf("err = %v, want stderr in message", err)
+	}
 }
 
 func TestSocketPassedToEveryCall(t *testing.T) {
@@ -127,7 +168,9 @@ func TestSocketPassedToEveryCall(t *testing.T) {
 	c := &CLI{Bin: "agtermctl", Socket: "/alt.sock", Exec: s.run}
 	c.NewCompanion(ctx, "P", "n", "cmd", "/d")
 	c.Status(ctx, "C", "active")
-	c.Info(ctx, "C", "-x")
+	c.Info(ctx, "C", "-x", 0)
+	c.ClearInfo(ctx, "C")
+	c.Tint(ctx, "C", "purple")
 	c.Rename(ctx, "C", "n")
 	for _, cl := range s.calls {
 		args := strings.Join(cl.args, " ")

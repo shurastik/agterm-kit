@@ -108,7 +108,7 @@ func TestReviewSendSecondRound(t *testing.T) {
 		agtermtest.Call{Method: "Type", Args: []string{"C-1", "Read " + prompt + " and follow it.\r"}},
 		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
 		agtermtest.Call{Method: "Rename", Args: []string{"C-1", "codex-review r2"}},
-		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r2: reviewing"}},
+		agtermtest.Call{Method: "Info", Args: []string{"C-1", "codex r2: reviewing", "0"}},
 	)
 	noStatus(t, h)
 	if !roundStarted(dir, 2) {

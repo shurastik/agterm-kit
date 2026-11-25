@@ -16,10 +16,13 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 	f := &Fake{CompanionID: "C", InfoErr: errors.New("x"), TextOut: "screen", OnType: func(_, text string) { typed = text }}
 	id, _ := f.NewCompanion(ctx, "P", "n", "cmd", "/d")
 	_ = f.Status(ctx, "C", "active")
-	infoErr := f.Info(ctx, "C", "md")
+	infoErr := f.Info(ctx, "C", "md", 0)
 	_ = f.Type(ctx, "C", "go\r")
 	renameErr := f.Rename(ctx, "C", "new name")
 	screen, _ := f.Text(ctx, "C", 20)
+	_ = f.Info(ctx, "S", "line", 1200*time.Second)
+	_ = f.ClearInfo(ctx, "S")
+	_ = f.Tint(ctx, "C", "purple")
 	if renameErr != nil {
 		t.Fatalf("renameErr = %v", renameErr)
 	}
@@ -29,10 +32,13 @@ func TestFakeRecordsAndScripts(t *testing.T) {
 	want := []Call{
 		{"NewCompanion", []string{"P", "n", "cmd", "/d"}},
 		{"Status", []string{"C", "active"}},
-		{"Info", []string{"C", "md"}},
+		{"Info", []string{"C", "md", "0"}},
 		{"Type", []string{"C", "go\r"}},
 		{"Rename", []string{"C", "new name"}},
 		{"Text", []string{"C", "20"}},
+		{"Info", []string{"S", "line", "1200"}},
+		{"ClearInfo", []string{"S"}},
+		{"Tint", []string{"C", "purple"}},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Fatalf("calls = %v", f.Calls)
@@ -105,5 +111,16 @@ func TestFakeRecordsDeadlines(t *testing.T) {
 	want, _ := ctx.Deadline()
 	if !f.Deadlines[0].IsZero() || !f.Deadlines[1].Equal(want) {
 		t.Fatalf("deadlines = %v, want zero then %v", f.Deadlines, want)
+	}
+}
+
+func TestFakeClearInfoAndTintErrors(t *testing.T) {
+	ctx := context.Background()
+	f := &Fake{ClearInfoErr: errors.New("a"), TintErr: errors.New("b")}
+	if err := f.ClearInfo(ctx, "S"); err == nil {
+		t.Error("ClearInfoErr not returned")
+	}
+	if err := f.Tint(ctx, "C", "purple"); err == nil {
+		t.Error("TintErr not returned")
 	}
 }

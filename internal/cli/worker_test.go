@@ -453,7 +453,7 @@ func TestCompanionName(t *testing.T) {
 		{"add-auth", "codex", "plan", 8, "add-auth · codex-plan r8"},
 	}
 	for _, tt := range tests {
-		if got := companionName(tt.change, tt.harness, tt.kind, tt.round); got != tt.want {
+		if got := companionName(tt.change, tt.harness, tt.kind, tt.round, false); got != tt.want {
 			t.Errorf("companionName(%q, %q, %q, %d) = %q, want %q", tt.change, tt.harness, tt.kind, tt.round, got, tt.want)
 		}
 	}

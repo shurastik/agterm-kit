@@ -53,7 +53,7 @@ func (r reporter) set(ctx context.Context, state, line string) bool {
 	}
 	for i := 1; ; i++ {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusTimeout)
-		err := r.env.Ctl.Info(cctx, r.target, line)
+		err := r.env.Ctl.Info(cctx, r.target, line, 0)
 		cancel()
 		if err == nil {
 			return true
@@ -86,6 +86,9 @@ type reviewState struct {
 	// Interactive marks a reviewer that runs as a harness TUI in its
 	// companion. A companion without it was started by an older agk.
 	Interactive bool `json:"interactive,omitempty"`
+	// Autopilot and AutopilotSession: see applyState.
+	Autopilot        bool   `json:"autopilot,omitempty"`
+	AutopilotSession string `json:"autopilot_session,omitempty"`
 }
 
 // Files of an interactive review in the run directory.
@@ -264,6 +267,7 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 	change := fs.String("change", "", "review the planning artifacts of this OpenSpec change instead of a diff (excludes --base)")
 	forChange := fs.String("for", "", "name the OpenSpec change this diff review implements, for the companion's name (excludes --change)")
 	reviewer := fs.String("reviewer", "", "reviewer HARNESS[:MODEL] for this run")
+	autopilot := fs.Bool("autopilot", false, "mark the run as started by the autopilot (🤖 companion name, purple icon, line refreshed by its waits)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK
@@ -295,6 +299,9 @@ func (e *Env) ReviewStart(ctx context.Context, args []string) int {
 			return e.errorf("invalid change name %q: want kebab-case, like add-dark-mode", *change)
 		}
 		state = reviewState{Change: *change}
+	}
+	if *autopilot {
+		state.Autopilot, state.AutopilotSession = true, e.session()
 	}
 	sc, render, err := e.reviewScope(ctx, e.Cwd, state)
 	if err != nil {
@@ -396,6 +403,9 @@ func (e *Env) startInteractive(ctx context.Context, parent, dir string, sc round
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	if state.Autopilot {
+		e.tintCompanion(ctx, reviewerWorker, id)
+	}
 	started := e.handshake(ctx, reviewerWorker, id)
 	if started {
 		markStarted(dir, 1)
@@ -408,9 +418,9 @@ func (e *Env) startInteractive(ctx context.Context, parent, dir string, sc round
 // its change as "-plan", a diff review the change it was started --for, if any.
 func reviewCompanionName(state reviewState, round int) string {
 	if state.Change != "" {
-		return companionName(state.Change, state.Worker.Harness, "plan", round)
+		return companionName(state.Change, state.Worker.Harness, "plan", round, state.Autopilot)
 	}
-	return companionName(state.For, state.Worker.Harness, "review", round)
+	return companionName(state.For, state.Worker.Harness, "review", round, state.Autopilot)
 }
 
 // reviewOutput is the output contract of an interactive round: the reviewer
@@ -561,6 +571,8 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 	if err != nil {
 		return e.errorf("%v", err)
 	}
+	e.armBeat(run.state.Autopilot, run.state.AutopilotSession)
+	e.beatNow(ctx)
 	note := ""
 	if *notePath != "" {
 		b, err := os.ReadFile(*notePath)

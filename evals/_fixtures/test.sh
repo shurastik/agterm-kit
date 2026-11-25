@@ -483,6 +483,21 @@ bash .eval/write-change.sh other-widget >/dev/null || fail "write-change.sh with
 if bash .eval/write-change.sh add-widget 2>/dev/null; then fail "write-change.sh accepted a taken name"; fi
 if bash .eval/write-change.sh Bad_Name 2>/dev/null; then fail "write-change.sh accepted a bad name"; fi
 bash .eval/write-change.sh >/dev/null || fail "write-change.sh without a name must keep rewriting add-widget"
+# autopilot on|off: logged, the inline answer, a usage error otherwise; --autopilot on both starts
+for m in on off; do
+  ao="$(a agk autopilot $m)" || fail "autopilot $m"
+  [ "$ao" = '{"session":null,"marked":false}' ] || fail "autopilot $m output: $ao"
+  grep -qx "agk autopilot $m" agk-calls.log || fail "autopilot $m was not logged"
+done
+if a agk autopilot 2>/dev/null; then fail "autopilot without an argument"; fi
+if a agk autopilot start 2>/dev/null; then fail "autopilot accepted an unknown argument"; fi
+if a agk autopilot on off 2>/dev/null; then fail "autopilot accepted two arguments"; fi
+aas="$(a agk apply start add-widget --autopilot)" || fail "apply start --autopilot"
+printf '%s' "$aas" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["started"] is True, r' || fail "apply start --autopilot output: $aas"
+grep -qx 'agk apply start add-widget --autopilot' agk-calls.log || fail "apply start --autopilot was not logged"
+ars="$(a agk review start --change add-widget --autopilot)" || fail "review start --change --autopilot"
+printf '%s' "$ars" | grep -q '"companion"' || fail "review start --autopilot output: $ars"
+grep -qx 'agk review start --change add-widget --autopilot' agk-calls.log || fail "review start --autopilot was not logged"
 # apply start in worktree mode (the `worktree` marker): plan commit, worktree, base, log in the main workspace
 stage "$ws/aw" --change --pending-worktree
 cd "$ws/aw"
@@ -542,6 +557,63 @@ assert not found(log(4, plan_sends=2)), 'plan reviewer sends must not count'
 assert found(log(5)), 'a fifth code send must fail, even without a sixth wait'
 assert found(log(5, sixth_wait=True)), 'a fifth code send must fail'
 assert found(log(6, plan_sends=1)), 'six code sends must fail'
+PY
+# The autopilot-mark graders match a realistic log: a good run passes each, a run that marks too late,
+# starts a worker without --autopilot, turns the mark off between needs-human and the wait, or calls
+# agk after the off fails it.
+python3 - "$fix/../cases" <<'PY' || fail "autopilot mark graders"
+import re, sys
+cases = sys.argv[1]
+def grader(case, name):
+    doc = open(f'{cases}/{case}/graders/{name}.md').read()
+    _, front, body = doc.split('---\n', 2)
+    return 'match: not_contains' in front, body.strip()
+def ok(case, name, log):
+    neg, pat = grader(case, name)
+    hit = re.search(pat, log, re.M) is not None
+    return (not hit) if neg else hit
+good = """agk autopilot on
+agk review start --change add-widget --autopilot
+  files: design.md decisions.md
+  cwd: /w
+agk review wait /w/.agk/reviews/1
+  round 1: 0 finding(s), verdict approve
+agk apply start add-widget --autopilot
+agk apply wait /w/.agk/applies/1
+  apply round 1: done
+agk review start --base main --for add-widget --autopilot
+  cwd: /w
+agk review wait /w/.agk/reviews/2
+  round 1: 0 finding(s), verdict approve
+verify add-widget
+agk autopilot on
+agk review fresh /w/.agk/reviews/2
+  fresh: true
+agk review close /w/.agk/reviews/2
+  close: last verdict approve
+agk review close /w/.agk/reviews/1
+  close: last verdict approve
+agk autopilot off
+"""
+H = 'autopilot-happy-path'
+for n in ('autopilot-on-before-the-plan-review', 'every-start-carries-autopilot', 'autopilot-on-after-verify',
+          'autopilot-off-after-the-closes', 'nothing-after-autopilot-off'):
+    assert ok(H, n, good), n
+assert not ok(H, 'autopilot-on-before-the-plan-review', good.replace('agk autopilot on\n', '', 1).replace('agk autopilot on\n', '', 1))
+assert not ok(H, 'every-start-carries-autopilot', good.replace('add-widget --autopilot\n  cwd', 'add-widget\n  cwd'))
+assert not ok(H, 'autopilot-on-after-verify', good.replace('verify add-widget\nagk autopilot on\n', 'verify add-widget\n'))
+assert not ok(H, 'autopilot-on-after-verify', good.replace('verify add-widget\nagk autopilot on\nagk review fresh /w/.agk/reviews/2\n  fresh: true\n', 'verify add-widget\nagk review fresh /w/.agk/reviews/2\n  fresh: true\nagk autopilot on\n'))
+assert not ok(H, 'autopilot-off-after-the-closes', good.replace('agk autopilot off\n', ''))
+assert not ok(H, 'nothing-after-autopilot-off', good + 'agk review close /w/x\n')
+C = 'autopilot-cancelled'
+cancelled = good.split('agk review wait /w/.agk/reviews/2')[0] + 'agk review wait /w/.agk/reviews/2\n  round 1: wait played cancelled\nagk autopilot off\n'
+assert ok(C, 'autopilot-off-before-the-report', cancelled) and ok(C, 'nothing-after-autopilot-off', cancelled) and ok(C, 'every-start-carries-autopilot', cancelled)
+assert not ok(C, 'autopilot-off-before-the-report', cancelled.replace('agk autopilot off\n', ''))
+N = 'autopilot-needs-human'
+nh = 'agk autopilot on\nagk apply wait /w/a\n  apply round 1: needs-human\nagk apply wait /w/a\n  apply round 1: done\n'
+assert ok(N, 'no-autopilot-off-between-needs-human-and-the-wait', nh)
+assert not ok(N, 'no-autopilot-off-between-needs-human-and-the-wait', nh.replace('needs-human\n', 'needs-human\nagk autopilot off\n', 1))
+assert ok(N, 'no-autopilot-off-between-needs-human-and-the-wait', nh + 'agk autopilot off\n')
 PY
 cd "$ws/b"
 [ "$(manifest)" = "$before" ] || fail "the checkout's outcomes/ changed during the self-test"

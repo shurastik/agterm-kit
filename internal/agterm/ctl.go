@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -150,9 +151,23 @@ func (c *CLI) Status(ctx context.Context, target, state string) error {
 	return err
 }
 
-// Info replaces the sidebar info line of target with inline markdown.
-func (c *CLI) Info(ctx context.Context, target, markdown string) error {
-	_, err := c.runOK(ctx, "session", "info", "--markdown", "--hide-after", "0", "--target", target, "--", markdown)
+// Info replaces the sidebar info line of target with inline markdown. The line
+// hides itself after hideAfter (whole seconds, restarted by each set); 0 keeps
+// it until it is replaced or cleared.
+func (c *CLI) Info(ctx context.Context, target, markdown string, hideAfter time.Duration) error {
+	_, err := c.runOK(ctx, "session", "info", "--markdown", "--hide-after", strconv.Itoa(int(hideAfter/time.Second)), "--target", target, "--", markdown)
+	return err
+}
+
+// ClearInfo removes the sidebar info line of target.
+func (c *CLI) ClearInfo(ctx context.Context, target string) error {
+	_, err := c.runOK(ctx, "session", "info", "--clear", "--target", target)
+	return err
+}
+
+// Tint colors the sidebar icon of target.
+func (c *CLI) Tint(ctx context.Context, target, color string) error {
+	_, err := c.runOK(ctx, "session", "tint", color, "--on", "icon", "--target", target)
 	return err
 }
 
@@ -166,7 +181,9 @@ func (c *CLI) Rename(ctx context.Context, target, name string) error {
 type Ctl interface {
 	NewCompanion(ctx context.Context, parent, name, command, cwd string) (string, error)
 	Status(ctx context.Context, target, state string) error
-	Info(ctx context.Context, target, markdown string) error
+	Info(ctx context.Context, target, markdown string, hideAfter time.Duration) error
+	ClearInfo(ctx context.Context, target string) error
+	Tint(ctx context.Context, target, color string) error
 	Rename(ctx context.Context, target, name string) error
 	Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error)
 	Close(ctx context.Context, target string) error

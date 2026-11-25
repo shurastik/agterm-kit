@@ -50,6 +50,31 @@ func TestFakeWaitSeq(t *testing.T) {
 	}
 }
 
+func TestFakeTextSeq(t *testing.T) {
+	boom := errors.New("boom")
+	f := &Fake{TextOut: "last", TextSeq: []TextResult{{Out: "one"}, {Err: boom}}}
+	ctx := context.Background()
+	s1, _ := f.Text(ctx, "C", 12)
+	_, e2 := f.Text(ctx, "C", 12)
+	s3, e3 := f.Text(ctx, "C", 12)
+	if s1 != "one" || !errors.Is(e2, boom) || s3 != "last" || e3 != nil {
+		t.Fatalf("%q %v %q %v", s1, e2, s3, e3)
+	}
+	if got := f.Methods(); !reflect.DeepEqual(got, []string{"Text", "Text", "Text"}) {
+		t.Fatalf("methods = %v", got)
+	}
+}
+
+func TestFakeTextBlocksUntilContextDone(t *testing.T) {
+	f := &Fake{TextBlocks: true, TextOut: "never"}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	out, err := f.Text(ctx, "C", 12)
+	if out != "" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
 func TestFakeWaitAndClose(t *testing.T) {
 	ctx := context.Background()
 	f := &Fake{WaitStatus: "completed", CloseErr: agterm.ErrGone}

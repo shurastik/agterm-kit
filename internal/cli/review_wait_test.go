@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -291,13 +292,16 @@ func TestReviewWaitInvalidFileOutlastingTimeoutGivesRunning(t *testing.T) {
 	writeOut(t, dir, 1, `{"verdict": "needs-att`) // half written, the turn keeps running
 	pollSlice = 5 * 1e9
 	h.ctl.WaitErr = agterm.ErrTimeout
+	runningScreen(h) // a codex turn shows its timer: the screen never settles
 	if code := runWait(h, dir, "--timeout", "12"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if h.out.String() != `{"status":"running","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
 	}
-	assertCalls(t, h.ctl, mainWait("5s"), mainWait("5s"), mainWait("2s"))
+	if got := h.ctl.Methods(); !reflect.DeepEqual(got, []string{"Text", "Wait", "Text", "Wait", "Text", "Wait", "Text"}) {
+		t.Fatalf("calls = %v", h.ctl.Calls)
+	}
 	if exists(filepath.Join(rundir.RoundDir(dir, 1), "result.json")) || len(typed(h)) != 0 {
 		t.Fatal("nothing may be recorded or typed")
 	}
@@ -782,5 +786,147 @@ func TestReviewWaitSuccessfulWaitsSpendTheBudget(t *testing.T) {
 	)
 	if h.out.String() != `{"status":"running","round":1}`+"\n" {
 		t.Fatalf("stdout = %q", h.out)
+	}
+}
+
+// stuckSlices scripts a reviewer whose status never leaves active with 5 s
+// slices: every Wait times out unless WaitSeq says otherwise.
+func stuckSlices(h *tenv) {
+	pollSlice = 5 * time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+}
+
+func TestReviewWaitCodexFixupFromSettledScreenWhenStatusStuck(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	rd := rundir.RoundDir(dir, 1)
+	fix := filepath.Join(rd, "fixup-1.md")
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n› \n"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Err: agterm.ErrTimeout}, // wait step: the output file is there after one slice
+		{Err: agterm.ErrTimeout}, // typeWhenIdle: one more slice to confirm the screen
+		{Status: "active"},       // status check before the warning
+		{Status: "active"},       // the fix-up turn starts
+	}
+	h.ctl.OnType = func(_, _ string) { writeOut(t, dir, 1, threeFindings) }
+	if code := runWait(h, dir, "--timeout", "60"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != completedResult+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if got := typed(h); !reflect.DeepEqual(got, []string{"Read " + fix + " and follow it.\r"}) {
+		t.Fatalf("typed = %q", got)
+	}
+	for _, want := range []string{"the reviewer C-1 still reports active", "its output file is on disk", "treating its turn as over"} {
+		if !strings.Contains(h.err.String(), want) {
+			t.Errorf("stderr lacks %q: %q", want, h.err)
+		}
+	}
+	if readFile(t, filepath.Join(rd, "fixups")) != "1\n" || !exists(fixupStartedFile(rd, 1)) {
+		t.Fatal("the attempt and its start must be recorded")
+	}
+	noStatus(t, h)
+}
+
+// runningScreen makes every screen read differ from the one before, the way a
+// running codex turn's `Working (Ns …)` timer does.
+func runningScreen(h *tenv) {
+	n := 0
+	h.ctl.OnText = func() { n++; h.ctl.TextOut = fmt.Sprintf("Working (%ds • esc to interrupt)\n", n*5) }
+}
+
+func TestReviewWaitCodexNoFixupIntoRunningTurn(t *testing.T) {
+	cases := map[string]func(h *tenv){
+		"screen still changing": func(h *tenv) {
+			runningScreen(h)
+		},
+		"codex dialog": func(h *tenv) {
+			h.ctl.TextOut = "Review these hooks?\n  Press Enter to confirm\n"
+		},
+		"screen cannot be read": func(h *tenv) { h.ctl.TextErr = errors.New("boom") },
+	}
+	for name, script := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			dir := idir(t)
+			writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+			stuckSlices(h)
+			script(h)
+			if code := runWait(h, dir, "--timeout", "30"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if h.out.String() != `{"status":"running","round":1}`+"\n" {
+				t.Fatalf("stdout = %q", h.out)
+			}
+			if got := typed(h); len(got) != 0 {
+				t.Fatalf("typed = %q: no fix-up into a running turn", got)
+			}
+			if exists(filepath.Join(rundir.RoundDir(dir, 1), "fixup-1.md")) {
+				t.Fatal("no fix-up may be recorded")
+			}
+		})
+	}
+}
+
+// The fallback needs an output file to judge: with none, a codex reviewer
+// whose status is stuck keeps waiting, and its screen is never read.
+func TestReviewWaitCodexNoOutputFileReadsNoScreen(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n"
+	if code := runWait(h, dir, "--timeout", "30"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" || textReads(h) != 0 || len(typed(h)) != 0 {
+		t.Fatalf("stdout %q, %d screen reads, typed %q", h.out, textReads(h), typed(h))
+	}
+}
+
+func TestReviewWaitClaudeReviewerKeepsStatusRule(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: config.Claude}, Base: "main", Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n"
+	if code := runWait(h, dir, "--timeout", "30"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" || textReads(h) != 0 || len(typed(h)) != 0 {
+		t.Fatalf("stdout %q, %d screen reads, typed %q", h.out, textReads(h), typed(h))
+	}
+}
+
+// Slow screen reads spend the wait's deadline too: with 5 s slices, 1 s reads
+// and a 12 s wait, the settled screen is found only after the budget is gone,
+// so no fix-up is typed and the wait gives running.
+func TestReviewWaitCodexSlowScreenReadsReachTheDeadline(t *testing.T) {
+	h := newHarness(t, true)
+	dir := idir(t)
+	writeOut(t, dir, 1, `{"verdict":"maybe"}`)
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n"
+	c := withClock(h)
+	c.waits = []time.Duration{5 * time.Second, 5 * time.Second, 5 * time.Second, 5 * time.Second}
+	for range 20 {
+		c.texts = append(c.texts, time.Second)
+	}
+	if code := runWait(h, dir, "--timeout", "12"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if h.out.String() != `{"status":"running","round":1}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+	if got := typed(h); len(got) != 0 {
+		t.Fatalf("typed = %q: no fix-up after the deadline", got)
+	}
+	if exists(filepath.Join(rundir.RoundDir(dir, 1), "fixup-1.md")) {
+		t.Fatal("no fix-up may be recorded")
 	}
 }

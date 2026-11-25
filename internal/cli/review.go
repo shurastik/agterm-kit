@@ -604,7 +604,12 @@ func (e *Env) ReviewSend(ctx context.Context, args []string) int {
 		return code
 	}
 	line := kickoff(filepath.Join(rundir.RoundDir(run.dir, k+1), "prompt.md"))
-	started, err := e.typeWhenIdle(ctx, reviewerWorker, companion, line, fmt.Sprintf("round %d", k+1), time.Duration(*timeout)*time.Second, time.Time{})
+	// A codex reviewer's status can stay wrong for good; round k is on disk
+	// (result.json, checked above), so a settled screen ends its turn too.
+	settle := codexSettler(run.state.Worker.Harness, fmt.Sprintf("round %d", k), func() bool {
+		return fileExists(filepath.Join(rundir.RoundDir(run.dir, k), "result.json"))
+	})
+	started, err := e.typeWhenIdle(ctx, reviewerWorker, companion, line, fmt.Sprintf("round %d", k+1), time.Duration(*timeout)*time.Second, time.Time{}, settle)
 	if err != nil {
 		// The reviewer never heard of the round: take it back.
 		rollbackRound(run.dir, k, k+1, e.Stderr)

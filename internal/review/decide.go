@@ -39,14 +39,17 @@ type Action struct {
 // Decide maps round k's output file (output, exists), the reviewer
 // companion's agent status, the wait error (nil, agterm.ErrGone or
 // agterm.ErrTimeout), the fix-ups typed so far and whether the latest of them
-// has started to one Action.
+// has started to one Action. settled says that a codex reviewer's screen has
+// settled with its output on disk (see the cli settler): it counts as a turn
+// end next to a completed or idle status, for a reviewer whose status never
+// leaves active, and overrides none of the other rules.
 //
 // A valid output always completes the round, whatever the status or the
 // fix-up gate. While a typed fix-up has not started, the status and the file
 // may still belong to the turn before it, so only a permission prompt, a gone
 // companion or the timeout end the wait and everything else keeps waiting;
 // that keeps a second fix-up from being typed into a running turn.
-func Decide(k int, output []byte, exists bool, status string, waitErr error, fixups int, fixupStarted bool) Action {
+func Decide(k int, output []byte, exists bool, status string, waitErr error, fixups int, fixupStarted bool, settled bool) Action {
 	var perr error
 	if exists {
 		r, err := Parse(output)
@@ -66,7 +69,7 @@ func Decide(k int, output []byte, exists bool, status string, waitErr error, fix
 	case fixups > 0 && !fixupStarted:
 		return Action{Kind: KeepWaiting}
 	}
-	turnOver := status == "completed" || status == "idle"
+	turnOver := status == "completed" || status == "idle" || settled
 	switch {
 	case !turnOver:
 		return Action{Kind: KeepWaiting}

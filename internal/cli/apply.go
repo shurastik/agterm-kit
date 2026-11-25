@@ -423,7 +423,12 @@ func (e *Env) ApplySend(ctx context.Context, args []string) int {
 		}
 		return code
 	}
-	started, err := e.typeWhenIdle(ctx, applierWorker, companion, line, fmt.Sprintf("round %d", k), time.Duration(*timeout)*time.Second, time.Time{})
+	// A codex applier's status can stay wrong for good; its current round's
+	// report on disk plus a settled screen ends its turn too. Without a report
+	// an applier that went quiet may be stuck or asking, so the status rule stays.
+	curReport := filepath.Join(rundir.RoundDir(run.dir, run.round), apply.ReportFile)
+	settle := codexSettler(run.state.Worker.Harness, fmt.Sprintf("round %d", run.round), func() bool { return fileExists(curReport) })
+	started, err := e.typeWhenIdle(ctx, applierWorker, companion, line, fmt.Sprintf("round %d", k), time.Duration(*timeout)*time.Second, time.Time{}, settle)
 	if err != nil {
 		rollbackRound(run.dir, run.round, k, e.Stderr)
 		return e.errorf("%v", err)

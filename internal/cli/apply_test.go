@@ -1046,3 +1046,107 @@ func TestApplyStartReusesTheChangeWorktree(t *testing.T) {
 		t.Fatalf("stdout = %q", h.out)
 	}
 }
+
+// withHarness switches the worker.json of apply run dir to harnessName, the
+// way a run started with that applier looks.
+func withHarness(t *testing.T, dir, harnessName string) {
+	t.Helper()
+	var st applyState
+	if have, err := rundir.ReadJSON(dir, workerFile, &st); err != nil || !have {
+		t.Fatalf("read worker.json: %v %v", have, err)
+	}
+	st.Worker.Harness = harnessName
+	if err := rundir.WriteJSON(dir, workerFile, st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func applyMsg(t *testing.T) string {
+	t.Helper()
+	msg := filepath.Join(t.TempDir(), "m.md")
+	if err := os.WriteFile(msg, []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return msg
+}
+
+func TestApplySendCodexStatusStuckActiveSettledScreen(t *testing.T) {
+	h := newHarness(t, true)
+	dir := startedApply(t, h, 1)
+	withHarness(t, dir, config.Codex)
+	writeReport(t, dir, 1, doneReport)
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, // two slices
+		{Status: "active"}, // status check
+		{Status: "active"}, // the line was picked up
+	}
+	if code := runApply(h, "send", dir, applyMsg(t), "--timeout", "30"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	prompt := filepath.Join(dir, "rounds", "2", "prompt.md")
+	if got := types(h); !reflect.DeepEqual(got, []string{"Read " + prompt + " and follow it.\r"}) {
+		t.Fatalf("typed %q", got)
+	}
+	for _, want := range []string{"the applier C-1 still reports active", "round 1 is on disk", "treating its turn as over"} {
+		if !strings.Contains(h.err.String(), want) {
+			t.Errorf("stderr lacks %q: %q", want, h.err)
+		}
+	}
+	if h.out.String() != `{"round":2,"started":true}`+"\n" {
+		t.Fatalf("stdout = %q", h.out)
+	}
+}
+
+func TestApplySendCodexKeepsBusy(t *testing.T) {
+	cases := map[string]struct {
+		report bool
+		screen func(h *tenv)
+	}{
+		"no report yet":         {false, func(h *tenv) { h.ctl.TextOut = "idle composer\n" }},
+		"screen still changing": {true, runningScreen},
+		"codex dialog":          {true, func(h *tenv) { h.ctl.TextOut = "Allow command? (y/n)\n" }},
+		"screen cannot be read": {true, func(h *tenv) { h.ctl.TextErr = errors.New("boom") }},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			dir := startedApply(t, h, 1)
+			withHarness(t, dir, config.Codex)
+			if c.report {
+				writeReport(t, dir, 1, doneReport)
+			}
+			stuckSlices(h)
+			c.screen(h)
+			code := runApply(h, "send", dir, applyMsg(t), "--timeout", "30")
+			if code != 1 || !strings.Contains(h.err.String(), "applier C-1 is busy") {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if len(types(h)) != 0 {
+				t.Fatalf("typed %q", types(h))
+			}
+			if !c.report && textReads(h) != 0 {
+				t.Fatalf("%d screen reads without a report", textReads(h))
+			}
+			if k, _ := rundir.Round(dir); k != 1 || exists(filepath.Join(dir, "rounds", "2")) {
+				t.Fatalf("no round may be recorded: %d", k)
+			}
+		})
+	}
+}
+
+func TestApplySendClaudeKeepsStatusRule(t *testing.T) {
+	h := newHarness(t, true)
+	dir := startedApply(t, h, 1)
+	writeReport(t, dir, 1, doneReport)
+	stuckSlices(h)
+	h.ctl.TextOut = "idle composer\n"
+	code := runApply(h, "send", dir, applyMsg(t), "--timeout", "30")
+	if code != 1 || !strings.Contains(h.err.String(), "applier C-1 is busy") {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if len(types(h)) != 0 || textReads(h) != 0 {
+		t.Fatalf("typed %q, %d screen reads: a claude applier keeps the status rule", types(h), textReads(h))
+	}
+}

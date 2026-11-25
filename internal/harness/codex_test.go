@@ -146,7 +146,7 @@ func TestCodexInteractive(t *testing.T) {
 	got := d.Interactive(config.Worker{Harness: config.Codex, Model: "gpt-5.5", Effort: "medium", ExtraArgs: []string{"--search"}}, "/repo", ApplierFiles{}, "", "Read /p and follow it.")
 	want := []string{"codex", "--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", "/repo",
 		"-m", "gpt-5.5", "-c", `model_reasoning_effort="medium"`, "--search",
-		"-c", "tui.disable_paste_burst=true", "Read /p and follow it."}
+		"-c", "tui.disable_paste_burst=true", "--no-daemon", "Read /p and follow it."}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q", got)
 	}
@@ -206,6 +206,7 @@ var codexSandbox = []string{
 	"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
 	"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
 	"-c", "tui.disable_paste_burst=true",
+	"--no-daemon",
 }
 
 func TestCodexInteractiveReviewer(t *testing.T) {
@@ -255,5 +256,52 @@ func TestCodexPasteBurstOverridesUserExtraArgs(t *testing.T) {
 				t.Fatalf("argv = %q: flag must be a -c pair before the kickoff", argv)
 			}
 		})
+	}
+}
+
+// --no-daemon keeps codex's hooks in the worker's own process, with its own
+// AGTERM_* variables. It comes once, after the tuning; codex exits on a
+// repeated flag, so an extra_args that already has it is not doubled.
+func TestCodexNoDaemon(t *testing.T) {
+	d := NewCodex(Runtime{})
+	cases := map[string]config.Worker{
+		"bare":      {Harness: config.Codex},
+		"tuned":     {Harness: config.Codex, Model: "gpt-5.5", Effort: "high", ExtraArgs: []string{"--search"}},
+		"in extras": {Harness: config.Codex, Model: "gpt-5.5", ExtraArgs: []string{"--no-daemon"}},
+	}
+	for name, w := range cases {
+		argvs := map[string][]string{
+			"applier":  d.Interactive(w, "/repo", ApplierFiles{}, "", "kick"),
+			"reviewer": d.InteractiveReviewer(w, "/repo", "/run/out", ReviewerFiles{}, "", "kick"),
+		}
+		for who, argv := range argvs {
+			t.Run(name+"/"+who, func(t *testing.T) {
+				n := 0
+				for _, a := range argv {
+					if a == "--no-daemon" {
+						n++
+					}
+				}
+				if n != 1 {
+					t.Fatalf("--no-daemon appears %d times in %q", n, argv)
+				}
+				if argv[len(argv)-1] != "kick" {
+					t.Fatalf("kickoff is not last in %q", argv)
+				}
+				if name == "in extras" {
+					return
+				}
+				at := slices.Index(argv, "--no-daemon")
+				burst := slices.Index(argv, "tui.disable_paste_burst=true")
+				if at < burst {
+					t.Fatalf("--no-daemon at %d, before the tuning and flags end at %d in %q", at, burst, argv)
+				}
+				for _, tune := range w.ExtraArgs {
+					if i := slices.Index(argv, tune); i > at {
+						t.Fatalf("extra arg %q at %d is after --no-daemon at %d", tune, i, at)
+					}
+				}
+			})
+		}
 	}
 }

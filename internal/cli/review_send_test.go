@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shurastik/agterm-kit/internal/agterm"
 	"github.com/shurastik/agterm-kit/internal/agterm/agtermtest"
@@ -739,5 +740,107 @@ func TestForRunIsADiffReviewInSendWaitFreshClose(t *testing.T) {
 			}
 			assertCalls(t, h.ctl, agtermtest.Call{Method: "Close", Args: []string{"C-1"}})
 		})
+	}
+}
+
+// stuckStatus scripts a status that never leaves active: every Wait for a turn
+// end times out, the ones after a typed line see active. Slices are 10 s, so
+// `--timeout 30` is three of them.
+func stuckStatus(h *tenv) {
+	pollSlice = 10 * time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+}
+
+func TestReviewSendCodexStatusStuckActiveSettledScreen(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "T-1", true)
+	stuckStatus(h)
+	h.ctl.TextOut = "idle composer\n"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, // two slices
+		{Status: "active"}, // status check
+		{Status: "active"}, // the line was picked up
+	}
+	if code := runSend(h, dir, "--timeout", "30"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	prompt := filepath.Join(dir, "rounds", "2", "prompt.md")
+	if got := types(h); !reflect.DeepEqual(got, []string{"Read " + prompt + " and follow it.\r"}) {
+		t.Fatalf("typed %q", got)
+	}
+	for _, want := range []string{"the reviewer C-1 still reports active", "round 1 is on disk", "treating its turn as over"} {
+		if !strings.Contains(h.err.String(), want) {
+			t.Errorf("stderr lacks %q: %q", want, h.err)
+		}
+	}
+	if k, _ := rundir.Round(dir); k != 2 || !strings.Contains(h.out.String(), `"round":2`) {
+		t.Fatalf("round %d, stdout %q", k, h.out)
+	}
+}
+
+func TestReviewSendCodexKeepsBusyWhenScreenCannotSettle(t *testing.T) {
+	cases := map[string]func(h *tenv){
+		"screen still changing": func(h *tenv) {
+			h.ctl.TextSeq = []agtermtest.TextResult{{Out: "Working (5s)"}, {Out: "Working (10s)"}, {Out: "Working (15s)"}}
+		},
+		"codex dialog": func(h *tenv) {
+			h.ctl.TextOut = "Trust these hooks?\n  Press Enter to confirm or Esc to cancel\n"
+		},
+		"screen cannot be read": func(h *tenv) { h.ctl.TextErr = errors.New("boom") },
+	}
+	for name, script := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, true)
+			_, dir := sendDir(t, h, "T-1", true)
+			stuckStatus(h)
+			script(h)
+			code := runSend(h, dir, "--timeout", "30")
+			if code != 1 || !strings.Contains(h.err.String(), "reviewer C-1 is busy: its turn did not end within 30 s") {
+				t.Fatalf("exit %d: %s", code, h.err)
+			}
+			if got := types(h); len(got) != 0 {
+				t.Fatalf("typed %q", got)
+			}
+			if k, _ := rundir.Round(dir); k != 1 || exists(rundir.RoundDir(dir, 2)) {
+				t.Fatalf("round %d: the round must be taken back", k)
+			}
+		})
+	}
+}
+
+func TestReviewSendCodexStatusDecidesFirst(t *testing.T) {
+	h := newHarness(t, true)
+	_, dir := sendDir(t, h, "T-1", true)
+	pollSlice = 10 * time.Second
+	h.ctl.TextOut = "idle composer\n"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if code := runSend(h, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if textReads(h) != 0 || h.err.Len() != 0 {
+		t.Fatalf("%d screen reads, stderr %q", textReads(h), h.err)
+	}
+}
+
+func TestReviewSendClaudeKeepsStatusRule(t *testing.T) {
+	h := newHarness(t, true)
+	root, dir := runDirWith(t, config.Worker{Harness: "claude"}, "T-1")
+	writeResultFile(t, dir, completedResult)
+	os.WriteFile(filepath.Join(dir, CompanionFile), []byte("C-1\n"), 0o644)
+	if err := rundir.WriteJSON(dir, workerFile, reviewState{Worker: config.Worker{Harness: "claude"}, Base: "main", Session: "T-1", Interactive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepareOut(dir); err != nil {
+		t.Fatal(err)
+	}
+	scriptScope(h, root)
+	stuckStatus(h)
+	h.ctl.TextOut = "idle composer\n"
+	code := runSend(h, dir, "--timeout", "30")
+	if code != 1 || !strings.Contains(h.err.String(), "reviewer C-1 is busy") {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if len(types(h)) != 0 || textReads(h) != 0 {
+		t.Fatalf("typed %q, %d screen reads: a claude reviewer keeps the status rule", types(h), textReads(h))
 	}
 }

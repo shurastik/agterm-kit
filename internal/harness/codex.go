@@ -41,10 +41,32 @@ func codexTuning(w config.Worker) []string {
 // turn the detection back on.
 var codexNoPasteBurst = []string{"-c", "tui.disable_paste_burst=true"}
 
+// codexNoDaemon is the flag that keeps an interactive codex out of the shared
+// app-server daemon. Without it a codex with no -c overrides attaches to a
+// running daemon, and its hooks then run there with the daemon's environment,
+// so they report to the AGTERM_SESSION_ID the daemon was started from, often a
+// session that no longer exists, instead of the worker's own. Needs codex
+// 0.156.0 or newer.
+const codexNoDaemon = "--no-daemon"
+
+// withNoDaemon appends codexNoDaemon to argv unless the user's extra_args
+// already carry that exact token: codex exits on a repeated flag.
+func withNoDaemon(argv []string, w config.Worker) []string {
+	for _, a := range w.ExtraArgs {
+		if a == codexNoDaemon {
+			return argv
+		}
+	}
+	return append(argv, codexNoDaemon)
+}
+
+// Interactive runs codex with --no-daemon (see codexNoDaemon) after the
+// tuning, next to the paste-burst flag.
 func (c *Codex) Interactive(w config.Worker, root string, _ ApplierFiles, _, kickoff string) []string {
 	argv := []string{c.Bin, "--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", root}
 	argv = append(argv, codexTuning(w)...)
 	argv = append(argv, codexNoPasteBurst...)
+	argv = withNoDaemon(argv, w)
 	return append(argv, kickoff)
 }
 
@@ -52,16 +74,18 @@ func (c *Codex) Interactive(w config.Worker, root string, _ ApplierFiles, _, kic
 // writable root is out (the working directory): configured extra roots are
 // reset and the tmp roots excluded. Approvals are off, so a command that needs
 // to leave the sandbox fails. The mandatory flags come after the tuning, so a
-// later user -c cannot widen them.
+// later user -c cannot widen them. It also runs with --no-daemon (see
+// codexNoDaemon), so its hooks run in its own process.
 func (c *Codex) InteractiveReviewer(w config.Worker, _, out string, _ ReviewerFiles, _, kickoff string) []string {
 	argv := append([]string{c.Bin}, codexTuning(w)...)
-	return append(argv,
+	argv = append(argv,
 		"--sandbox", "workspace-write", "--ask-for-approval", "never", "-C", out,
 		"-c", "sandbox_workspace_write.writable_roots=[]",
 		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
 		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
-		"-c", "tui.disable_paste_burst=true", // see codexNoPasteBurst
-		kickoff)
+		"-c", "tui.disable_paste_burst=true") // see codexNoPasteBurst
+	argv = withNoDaemon(argv, w)
+	return append(argv, kickoff)
 }
 
 // codexArgs is `exec` with a sandbox, or `exec <tuning> resume <thread>`

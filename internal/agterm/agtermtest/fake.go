@@ -42,6 +42,13 @@ type Fake struct {
 	// WaitSeq, when non-empty, scripts successive Wait calls; each call pops
 	// the first entry. When it runs out, WaitStatus and WaitErr apply.
 	WaitSeq []WaitResult
+	// TextSeq, when non-empty, scripts successive Text calls (successive
+	// screens); each call pops the first entry. When it runs out, TextOut and
+	// TextErr apply.
+	TextSeq []TextResult
+	// TextBlocks makes Text block until its context is done, then return the
+	// context's error: a hung agtermctl call.
+	TextBlocks bool
 	// OnText, when set, runs before Text returns.
 	OnText func()
 	// OnType, when set, runs before Type returns.
@@ -108,6 +115,12 @@ type WaitResult struct {
 	Err    error
 }
 
+// TextResult is one scripted Text answer.
+type TextResult struct {
+	Out string
+	Err error
+}
+
 // Wait records target, the joined statuses and the timeout.
 func (f *Fake) Wait(ctx context.Context, target string, until []string, timeout time.Duration) (string, error) {
 	f.record(ctx, "Wait", target, strings.Join(until, ","), timeout.String())
@@ -137,6 +150,17 @@ func (f *Fake) Text(ctx context.Context, target string, lines int) (string, erro
 	f.record(ctx, "Text", target, fmt.Sprint(lines))
 	if f.OnText != nil {
 		f.OnText()
+	}
+	if f.TextBlocks {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.TextSeq) > 0 {
+		r := f.TextSeq[0]
+		f.TextSeq = f.TextSeq[1:]
+		return r.Out, r.Err
 	}
 	return f.TextOut, f.TextErr
 }

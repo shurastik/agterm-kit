@@ -103,6 +103,12 @@ func writeFixups(rd string, n int) error {
 // fixupStartedFile marks fix-up n as seen active.
 func fixupStartedFile(rd string, n int) string { return fixupFile(rd, n) + ".started" }
 
+// validOutput reports whether raw parses as a review.
+func validOutput(raw []byte) bool {
+	_, err := review.Parse(raw)
+	return err == nil
+}
+
 // readOutput returns the reviewer's output file of the round, if any.
 func readOutput(path string) (raw []byte, exists bool, err error) {
 	raw, err = os.ReadFile(path)
@@ -122,6 +128,10 @@ func (e *Env) waitInteractive(ctx context.Context, run reviewRun, k int, compani
 	out := outputPath(run.dir, k)
 	rep := reporter{env: e, target: companion}
 	status, werr := "", error(nil)
+	// A codex reviewer's status can stay wrong for good: its settled screen,
+	// with an invalid output file on disk, ends its turn for the fix-up
+	// decision. A claude reviewer's status comes from agk's own hooks.
+	settle := codexSettler(run.state.Worker.Harness, "its output file", func() bool { return fileExists(out) })
 	// One deadline for the whole wait: what is left is the smaller of the
 	// budget the slices still count and the clock's remainder, so waits that
 	// succeeded (and took time) spend it too.
@@ -141,7 +151,23 @@ func (e *Env) waitInteractive(ctx context.Context, run reviewRun, k int, compani
 			_, serr := os.Stat(fixupStartedFile(rd, fixups))
 			started = serr == nil
 		}
-		act := review.Decide(k, raw, exists, status, werr, fixups, started)
+		settled := false
+		if settle != nil {
+			// A typed fix-up that has not started closes Decide's gate, so
+			// a settled screen could change nothing.
+			if started && exists && !validOutput(raw) && status != "completed" && status != "idle" && status != "blocked" {
+				// The screen read stays inside the wait's deadline.
+				if rem := deadline.Sub(e.Now()); rem > 0 {
+					cctx, cancel := context.WithTimeout(ctx, rem)
+					settled = settle.check(cctx, e.Ctl, companion)
+					cancel()
+				}
+				left = min(left, deadline.Sub(e.Now()))
+			} else {
+				settle.reset()
+			}
+		}
+		act := review.Decide(k, raw, exists, status, werr, fixups, started, settled)
 		switch act.Kind {
 		case review.Completed:
 			return e.recordCompleted(ctx, run, k, act.Review, rep)
@@ -158,8 +184,11 @@ func (e *Env) waitInteractive(ctx context.Context, run reviewRun, k int, compani
 			return e.printJSON(waitOutcome{Status: "running", Round: k})
 		}
 		if act.Kind == review.Fixup {
-			if stop := e.typeFixup(ctx, run, k, companion, fixups+1, act.Err, left, deadline); stop != nil {
+			if stop := e.typeFixup(ctx, run, k, companion, fixups+1, act.Err, left, deadline, settle); stop != nil {
 				return *stop
+			}
+			if settle != nil {
+				settle.reset() // the next turn's screen has to settle again
 			}
 			status, werr = "", nil
 			continue
@@ -205,7 +234,7 @@ func (e *Env) waitStep(ctx context.Context, run reviewRun, k int, companion stri
 
 // typeFixup writes fix-up n, types its line into the session and records the
 // attempt. It returns the exit code to stop with, or nil to carry on waiting.
-func (e *Env) typeFixup(ctx context.Context, run reviewRun, k int, companion string, n int, verr error, left time.Duration, deadline time.Time) *int {
+func (e *Env) typeFixup(ctx context.Context, run reviewRun, k int, companion string, n int, verr error, left time.Duration, deadline time.Time, settle *settler) *int {
 	rd := rundir.RoundDir(run.dir, k)
 	prompt, err := review.FixupPrompt(k, outputPath(run.dir, k), filepath.Join(run.dir, schemaName), verr)
 	if err != nil {
@@ -218,7 +247,7 @@ func (e *Env) typeFixup(ctx context.Context, run reviewRun, k int, companion str
 	if err := writeFixups(rd, n); err != nil {
 		return ptr(e.errorf("record fix-up: %v", err))
 	}
-	started, err := e.typeWhenIdle(ctx, reviewerWorker, companion, kickoff(path), fmt.Sprintf("fix-up %d", n), left, deadline)
+	started, err := e.typeWhenIdle(ctx, reviewerWorker, companion, kickoff(path), fmt.Sprintf("fix-up %d", n), left, deadline, settle)
 	if err != nil {
 		// Nothing was typed: the attempt did not happen.
 		_ = writeFixups(rd, n-1)

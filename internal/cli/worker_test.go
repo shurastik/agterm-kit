@@ -49,7 +49,7 @@ func TestWaitSlicedFileAppearsWithBudgetLeft(t *testing.T) {
 func TestTypeWhenIdleTypesAndConfirms(t *testing.T) {
 	h := newHarness(t, true)
 	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
-	started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "Read x and follow it.", "round 2", 10*time.Minute, time.Time{})
+	started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "Read x and follow it.", "round 2", 10*time.Minute, time.Time{}, nil)
 	if err != nil || !started {
 		t.Fatalf("started %v err %v", started, err)
 	}
@@ -63,7 +63,7 @@ func TestTypeWhenIdleTypesAndConfirms(t *testing.T) {
 func TestTypeWhenIdleUnconfirmedStartWarns(t *testing.T) {
 	h := newHarness(t, true)
 	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "idle"}, {Err: agterm.ErrTimeout}}
-	started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", time.Minute, time.Time{})
+	started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", time.Minute, time.Time{}, nil)
 	if err != nil || started {
 		t.Fatalf("started %v err %v", started, err)
 	}
@@ -110,7 +110,7 @@ const wrappedScreen = "› Read /repo/.agk/reviews/20261105-100000/rounds/2/\n" 
 	"  prompt.md and follow it.\n"
 
 func typeLine(h *tenv, deadline time.Time) (bool, error) {
-	return h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", handshakeLine, "round 2", time.Minute, deadline)
+	return h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", handshakeLine, "round 2", time.Minute, deadline, nil)
 }
 
 // types returns the texts of the recorded Type calls.
@@ -431,7 +431,7 @@ func TestTypeWhenIdleRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, true)
 			c.prep(h)
-			started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 30*time.Second, time.Time{})
+			started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 30*time.Second, time.Time{}, nil)
 			if err == nil || started || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("started %v err %v, want %q", started, err, c.want)
 			}
@@ -456,5 +456,283 @@ func TestCompanionName(t *testing.T) {
 		if got := companionName(tt.change, tt.harness, tt.kind, tt.round); got != tt.want {
 			t.Errorf("companionName(%q, %q, %q, %d) = %q, want %q", tt.change, tt.harness, tt.kind, tt.round, got, tt.want)
 		}
+	}
+}
+
+// settleHarness is a harness for the screen fallback of typeWhenIdle: a short
+// poll slice, a status that never reaches a turn end (every Wait times out
+// unless WaitSeq says otherwise) and a settler whose evidence is evidence.
+func settleHarness(t *testing.T, evidence bool) (*tenv, *settler) {
+	t.Helper()
+	h := newHarness(t, true)
+	pollSlice = time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+	return h, newSettler("round 1", func() bool { return evidence })
+}
+
+func typeSettled(h *tenv, s *settler) (bool, error) {
+	return h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 3*time.Second, time.Time{}, s)
+}
+
+func textReads(h *tenv) int {
+	n := 0
+	for _, m := range h.ctl.Methods() {
+		if m == "Text" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTypeWhenIdleSettledScreenTypesWithWarning(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextOut = "idle composer\n› \n"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{
+		{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, // two slices
+		{Status: "active"}, // the status check before the warning
+		{Status: "active"}, // the line was picked up
+	}
+	started, err := typeSettled(h, s)
+	if err != nil || !started {
+		t.Fatalf("started %v err %v", started, err)
+	}
+	assertCalls(t, h.ctl,
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "1s"}},
+		agtermtest.Call{Method: "Text", Args: []string{"C-1", "40"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "1s"}},
+		agtermtest.Call{Method: "Text", Args: []string{"C-1", "40"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active,completed,idle,blocked", "1s"}},
+		agtermtest.Call{Method: "Type", Args: []string{"C-1", "line\r"}},
+		agtermtest.Call{Method: "Wait", Args: []string{"C-1", "active", "10s"}},
+	)
+	want := "agk: warning: the reviewer C-1 still reports active, but round 1 is on disk and its screen has not changed for 1 s; treating its turn as over\n"
+	if h.err.String() != want {
+		t.Fatalf("stderr = %q, want %q", h.err, want)
+	}
+}
+
+func TestTypeWhenIdleSettledUnknownStatusWarns(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextOut = "same"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Status: "active"}}
+	if _, err := typeSettled(h, s); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.err.String(), "still reports no finished turn, but round 1 is on disk") {
+		t.Fatalf("stderr = %q", h.err)
+	}
+	if got := types(h); !reflect.DeepEqual(got, []string{"line\r"}) {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+// The status check before the warning is a last chance for the status: a turn
+// end it reports is the ordinary path, a prompt is a refusal.
+func TestTypeWhenIdleSettledStatusCheckDecides(t *testing.T) {
+	t.Run("completed", func(t *testing.T) {
+		h, s := settleHarness(t, true)
+		h.ctl.TextOut = "same"
+		h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Status: "completed"}, {Status: "active"}}
+		if started, err := typeSettled(h, s); err != nil || !started {
+			t.Fatalf("started %v err %v", started, err)
+		}
+		if h.err.Len() != 0 {
+			t.Fatalf("stderr = %q: a reported turn end needs no warning", h.err)
+		}
+	})
+	t.Run("blocked", func(t *testing.T) {
+		h, s := settleHarness(t, true)
+		h.ctl.TextOut = "same"
+		h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Status: "blocked"}}
+		_, err := typeSettled(h, s)
+		if !errors.Is(err, errPrompt) || len(types(h)) != 0 {
+			t.Fatalf("err %v typed %q", err, types(h))
+		}
+	})
+	t.Run("gone", func(t *testing.T) {
+		h, s := settleHarness(t, true)
+		h.ctl.TextOut = "same"
+		h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Err: agterm.ErrGone}}
+		_, err := typeSettled(h, s)
+		if !errors.Is(err, agterm.ErrGone) || len(types(h)) != 0 {
+			t.Fatalf("err %v typed %q", err, types(h))
+		}
+	})
+}
+
+func TestTypeWhenIdleChangingScreenIsBusy(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextSeq = []agtermtest.TextResult{{Out: "Working (5s)"}, {Out: "Working (10s)"}, {Out: "Working (15s)"}}
+	started, err := typeSettled(h, s)
+	var ie *idleError
+	if started || !errors.As(err, &ie) || !errors.Is(err, agterm.ErrTimeout) || !strings.Contains(err.Error(), "is busy") {
+		t.Fatalf("started %v err %v", started, err)
+	}
+	if got := types(h); len(got) != 0 {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+func TestTypeWhenIdleDialogMarkerIsBusy(t *testing.T) {
+	for _, marker := range []string{"Press Enter to confirm", "enter to submit answer", "ENTER TO SUBMIT ALL", "Allow command?"} {
+		t.Run(marker, func(t *testing.T) {
+			h, s := settleHarness(t, true)
+			h.ctl.TextOut = "Do you trust this folder?\n  1. Yes\n  " + marker + " or esc to cancel\n"
+			_, err := typeSettled(h, s)
+			if !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 {
+				t.Fatalf("err %v typed %q", err, types(h))
+			}
+			if textReads(h) < 2 {
+				t.Fatalf("calls = %v: the screen was read twice and still refused", h.ctl.Calls)
+			}
+		})
+	}
+}
+
+// Only the last 12 lines count: a marker that scrolled off the end is old
+// output, and trailing blank rows do not push a live dialog out of the window.
+func TestTypeWhenIdleDialogWindow(t *testing.T) {
+	old := "press enter to confirm\n" + strings.Repeat("output\n", 12)
+	h, s := settleHarness(t, true)
+	h.ctl.TextOut = old
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Err: agterm.ErrTimeout}, {Err: agterm.ErrTimeout}, {Status: "active"}, {Status: "active"}}
+	if _, err := typeSettled(h, s); err != nil || len(types(h)) != 1 {
+		t.Fatalf("err %v typed %q: a marker above the last 12 lines does not block", err, types(h))
+	}
+	live := "press enter to confirm\n" + strings.Repeat("output\n", 11) + strings.Repeat("\n", 20)
+	h, s = settleHarness(t, true)
+	h.ctl.TextOut = live
+	if _, err := typeSettled(h, s); !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 {
+		t.Fatalf("err %v typed %q: blank rows at the end must not hide a dialog", err, types(h))
+	}
+}
+
+func TestTypeWhenIdleNoEvidenceReadsNoScreen(t *testing.T) {
+	h, s := settleHarness(t, false)
+	h.ctl.TextOut = "same"
+	_, err := typeSettled(h, s)
+	if !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 || textReads(h) != 0 {
+		t.Fatalf("err %v typed %q, %d screen reads", err, types(h), textReads(h))
+	}
+}
+
+func TestTypeWhenIdleUnreadableScreenIsBusy(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextErr = errors.New("boom")
+	_, err := typeSettled(h, s)
+	if !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 {
+		t.Fatalf("err %v typed %q", err, types(h))
+	}
+}
+
+// A failed read forgets the previous screen: two equal reads must be
+// consecutive.
+func TestTypeWhenIdleReadErrorResetsPreviousScreen(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextSeq = []agtermtest.TextResult{{Out: "same"}, {Err: errors.New("boom")}}
+	h.ctl.TextOut = "same"
+	pollSlice = time.Second
+	_, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 3*time.Second, time.Time{}, s)
+	if !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 {
+		t.Fatalf("err %v typed %q: same, error, (third read never taken) must not settle", err, types(h))
+	}
+}
+
+func TestTypeWhenIdleStatusEndsBeforeAnyScreenRead(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.TextOut = "same"
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "completed"}, {Status: "active"}}
+	if started, err := typeSettled(h, s); err != nil || !started {
+		t.Fatalf("started %v err %v", started, err)
+	}
+	if textReads(h) != 0 || h.err.Len() != 0 {
+		t.Fatalf("%d screen reads, stderr %q: a reported turn end wins at once", textReads(h), h.err)
+	}
+}
+
+func TestTypeWhenIdleBlockedStillRefusesWithSettler(t *testing.T) {
+	h, s := settleHarness(t, true)
+	h.ctl.WaitSeq = []agtermtest.WaitResult{{Status: "blocked"}}
+	_, err := typeSettled(h, s)
+	if !errors.Is(err, errPrompt) || len(types(h)) != 0 || textReads(h) != 0 {
+		t.Fatalf("err %v typed %q", err, types(h))
+	}
+}
+
+func TestTypeWhenIdleWithoutSettlerWaitsOnce(t *testing.T) {
+	h := newHarness(t, true)
+	pollSlice = time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+	_, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 3*time.Second, time.Time{}, nil)
+	if !errors.Is(err, agterm.ErrTimeout) {
+		t.Fatalf("err = %v", err)
+	}
+	assertCalls(t, h.ctl, agtermtest.Call{Method: "Wait", Args: []string{"C-1", "completed,blocked,idle", "3s"}})
+}
+
+// The time the screen reads take comes out of the budget: two 5 s slices and
+// two 1 s reads must not type after 12 s on an 11 s budget.
+func TestTypeWhenIdleScreenReadsSpendTheBudget(t *testing.T) {
+	h := newHarness(t, true)
+	pollSlice = 5 * time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+	h.ctl.TextOut = "same"
+	c := withClock(h)
+	c.waits = []time.Duration{5 * time.Second, 5 * time.Second, 5 * time.Second}
+	c.texts = []time.Duration{time.Second, time.Second, time.Second, time.Second}
+	s := newSettler("round 1", func() bool { return true })
+	started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 11*time.Second, time.Time{}, s)
+	if started || !errors.Is(err, agterm.ErrTimeout) || !strings.Contains(err.Error(), "is busy") {
+		t.Fatalf("started %v err %v", started, err)
+	}
+	if got := types(h); len(got) != 0 {
+		t.Fatalf("typed %q after the budget was spent", got)
+	}
+}
+
+// The caller's deadline caps the fallback too, when it is earlier than the
+// timeout (the fix-up's `review wait` deadline).
+func TestTypeWhenIdleDeadlineCapsTheFallback(t *testing.T) {
+	h := newHarness(t, true)
+	pollSlice = 5 * time.Second
+	h.ctl.WaitErr = agterm.ErrTimeout
+	h.ctl.TextOut = "same"
+	c := withClock(h)
+	c.waits = []time.Duration{5 * time.Second, 5 * time.Second, 5 * time.Second}
+	c.texts = []time.Duration{time.Second, time.Second, time.Second, time.Second}
+	s := newSettler("round 1", func() bool { return true })
+	deadline := h.env.Now().Add(11 * time.Second)
+	_, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", time.Hour, deadline, s)
+	if !errors.Is(err, agterm.ErrTimeout) || len(types(h)) != 0 {
+		t.Fatalf("err %v typed %q", err, types(h))
+	}
+}
+
+// A screen read that hangs ends with the budget, not never.
+func TestTypeWhenIdleHungScreenReadEndsWithTheBudget(t *testing.T) {
+	h := newHarness(t, true)
+	pollSlice = 100 * time.Millisecond
+	h.ctl.WaitErr = agterm.ErrTimeout
+	h.ctl.TextBlocks = true
+	s := newSettler("round 1", func() bool { return true })
+	type res struct {
+		started bool
+		err     error
+	}
+	done := make(chan res, 1)
+	go func() {
+		started, err := h.env.typeWhenIdle(context.Background(), reviewerWorker, "C-1", "line", "round 2", 300*time.Millisecond, time.Time{}, s)
+		done <- res{started, err}
+	}()
+	select {
+	case r := <-done:
+		if r.started || !errors.Is(r.err, agterm.ErrTimeout) || !strings.Contains(r.err.Error(), "is busy") {
+			t.Fatalf("started %v err %v", r.started, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("typeWhenIdle hangs on a screen read that never returns")
+	}
+	if got := types(h); len(got) != 0 {
+		t.Fatalf("typed %q", got)
 	}
 }

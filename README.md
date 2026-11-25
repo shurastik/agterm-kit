@@ -78,7 +78,8 @@ archived into the project's specs.
 - `git`.
 - [`openspec`](https://github.com/Fission-AI/OpenSpec), the CLI the applier and `/agk-propose` use.
 - [`claude`](https://claude.com/claude-code) (Claude Code) and [`codex`](https://github.com/openai/codex)
-  (Codex CLI).
+  (Codex CLI), codex 0.156.0 or newer: the reviewer and applier companions start it with
+  `--no-daemon`, which that release introduced, and an older codex exits on the unknown flag.
 - [`revdiff`](https://github.com/umputun/revdiff), optional: `/agk-propose` uses it for your pass
   over the plan and skips that step without it.
 
@@ -87,7 +88,7 @@ archived into the project's specs.
 as optional. That check is stricter than what a run needs: a run only starts the harnesses its
 workers are configured with (the applier is `claude` and the reviewer `codex` by default, see
 [Configuration](#configuration)), so the other CLI is needed to make `agk setup` pass, not to run a
-worker. The README names no minimum versions: none is verified.
+worker. Codex 0.156.0 is the only minimum version the README names; no other version is verified.
 
 ## Installation
 
@@ -230,6 +231,17 @@ agk review close <review run dir>
 timeouts (`--timeout SECONDS`) default to 3600 s for `apply wait`, 600 s for `apply send` and
 `review send` (how long they wait for the worker's turn to end before typing the next round) and
 1800 s for `review wait`. Exit codes: 0 ok, 1 error.
+
+`send` types the next round once agterm reports the worker's turn as over. A codex worker's status
+comes from codex's own hooks and can stay `active` for good, so for codex workers `send` has a
+fallback behind that rule: the status always wins first (`completed` or `idle` types at once,
+`blocked` refuses), and when it never shows a turn end, agk treats the turn as over once the
+round's outcome is on disk (the reviewer's `result.json`, the applier's `report.json`), the
+companion's screen has not changed for 5 s and it shows no codex dialog asking to confirm, answer
+or allow a command. It then types the line and warns on stderr. The same fallback lets
+`review wait` type its fix-up for an invalid output file into a codex reviewer whose status is
+stuck. A claude worker keeps the status rule alone, and so does a codex worker whose round is not
+on disk yet or whose screen keeps changing: they time out as busy.
 
 ## Autopilot
 

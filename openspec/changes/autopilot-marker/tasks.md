@@ -1,0 +1,35 @@
+# Tasks
+
+## 1. agterm calls
+
+- [ ] 1.1 Give `agterm.Ctl.Info` a `hideAfter time.Duration` argument (`--hide-after <seconds>`), add `ClearInfo(ctx, target)` (`session info --clear --target <id>`) and `Tint(ctx, target, color)` (`session tint <color> --on icon --target <id>`) to `Ctl`, `*CLI` (through `runOK`, with the socket) and `agtermtest.Fake` (recorded, can be told to fail) in one step; keep the reviewer line at `hideAfter` 0 in `reporter.set`. RED: tests of the exact `*CLI` argv of the three calls; GREEN: verify `go build ./...` and `go test ./internal/agterm/... ./internal/cli/...` pass
+
+## 2. Live autopilot state
+
+- [ ] 2.1 Add the per-session live file of design D1 (`<state>/agk/autopilot/<session>.json` with `until`; `<state>` = absolute `$XDG_STATE_HOME`, else `~/.local/state`; ids outside `[A-Za-z0-9_-]+` are never live): mark (write `until` = now + 1200 s), live (file exists and `until` after now), drop (remove, missing is fine), all through `Env.Now`, `Env.Home`, `Env.Getenv` and `fsx.ReplaceFile`. Tests on a temp home: XDG and fallback paths, live before and not after `until`, drop of a missing file, unsafe id never live and never written; verify `go test ./internal/cli/...` passes
+
+- [ ] 2.2 Serialize the live state per design D1b: `on`, `off` and a beat take an exclusive `syscall.Flock` on `<state>/agk/autopilot/<session>.lock` around their whole sequence (file and line), the lock file is never removed. Test: a fake Ctl whose `Info` call during a beat starts `off` in a goroutine; after both return, the live file is gone, the last agterm call is the clear and a further beat sets nothing; verify `go test -race ./internal/cli/...` passes
+
+## 3. agk autopilot on|off
+
+- [ ] 3.1 Add `internal/cli/autopilot.go` and the `autopilot` dispatch in `main.go`: `on` sets the line `🤖 ^[autopilot](color: "purple")` with 1200 s expiry on `AGTERM_SESSION_ID` and marks the live file; `off` clears the line and drops the file; output `{"session":"<id>"|null,"marked":<bool>}`, exit 0; outside agterm no agterm call, no file, `{"session":null,"marked":false}`; agterm refusal or an unsafe id is a warning and `"marked":false`; usage error (no arg, unknown arg, extra arg) exit 1 with the usage on stderr, `--help` on stdout exit 0. Tests against the fake for every scenario of the `autopilot-marker` requirements "Autopilot line on", "Autopilot line off", "Autopilot command outside agterm", "Autopilot command usage" and the line-refused case; verify `go test ./internal/cli/...` passes
+- [ ] 3.2 Add `agk autopilot on|off` to `agk --help` in `main.go` and its help test if one pins the text; verify `go test ./internal/cli/...` passes
+
+## 4. Autopilot runs of the workers
+
+- [ ] 4.1 Add `--autopilot` to `agk apply start` and `agk review start` (parsed with the other flags, in the usage strings); record `"autopilot": true` and `"autopilot_session": <caller session or "">` in `applyState` and `reviewState`; no fields without the flag. Tests: both starts record the fields inside agterm, an inline apply start records the flag without a session and calls no agterm command, a start without the flag records neither; verify `go test ./internal/cli/...` passes
+- [ ] 4.2 Prefix `🤖 ` in `companionName` for autopilot runs and pass the run's flag at both starts and both sends' renames (`reviewCompanionName` too); tint the new companion `purple` right after `startCompanion` returned its id, a refusal is `agk: warning: tint <applier|reviewer> <id>: <err>` with stdout and exit unchanged. Tests: `🤖 add-auth · claude-apply r1` and tint, `🤖 add-auth · codex-plan r1`, `🤖 add-auth · codex-review r1`, renames to `🤖 add-auth · codex-review r2`, `🤖 add-x · claude-plan r3`, `🤖 add-auth · claude-apply r2`, tint refused is a warning, no prefix and no tint without the flag; verify `go test ./internal/cli/...` passes
+
+## 5. Heartbeat
+
+- [ ] 5.1 Add the heartbeat of design D3: an `Env` hook armed by `agk apply wait|send` and `agk review wait|send` for a run with `autopilot` and a non-empty `autopilot_session`; a beat, when the session's autopilot is live, sets that session's autopilot line with 1200 s expiry and re-marks the live file, at most once per 60 s (by `Env.Now`); armed commands beat once on entry, and `waitPolling` beats between slices; for an armed run every single-`Ctl.Wait` path of `typeWhenIdle` runs through `waitPolling` (a done that never fires, same statuses and budget) so a long send beats too, a path that already polls (the codex `settle` check, if present) keeps its done check unchanged, and unarmed runs keep their calls; a refused line is a warning and changes no output. Tests with a fake clock: wait on a long round beats once per 60 s and not more often, send beats on entry, a send with `--timeout 3600` on a busy worker beats once per 60 s, an unarmed claude send still calls one `Ctl.Wait` with the whole timeout, an armed codex send whose status sticks `active` still types the round once its settle check fires (if the settle exists in the code), no beat after `off`, no beat once `until` passed, no beat for a run without the flag, refused line keeps stdout and exit, the hooked applier wait and the review wait both beat; verify `go test ./internal/cli/...` passes
+
+## 6. Skill, evals and docs
+
+- [ ] 6.1 Update `skills/agk-autopilot/SKILL.md` per design D7: `agk autopilot on` after the preconditions, `--autopilot` on every `agk review start` (steps 2 and 4, Applier blocked) and `agk apply start` (step 3), `agk autopilot on` again right after every verify run, `agk autopilot off` before the final report on the finished path (after closing the reviewers) and on every stop, a failed `on`/`off` does not stop the run, a needs-human wait keeps the mark; verify by reading each step against the `autopilot-workflow` requirement "Autopilot mark"
+- [ ] 6.2 Teach the stand-in `evals/_fixtures/bin/agk` `autopilot on|off` (logged, prints the inline output) and `--autopilot` on both starts, extend `evals/_fixtures/test.sh` for both; grade the calls in `autopilot-happy-path` (on before the change, `--autopilot` on every start, on after verify, off before the report), `autopilot-cancelled` (off before the report), `autopilot-needs-human` (no off between needs-human and the next wait) and `autopilot-no-openspec-skills` (no on); map the new scenarios in `evals/README.md`; verify `evals/_fixtures/test.sh` passes
+- [ ] 6.3 Update `README.md`: `agk autopilot on|off`, `--autopilot` on both starts, the marks (main-session line with its 20-minute expiry and refresh, `🤖` prefix and purple tint of the companions, kept until close), the no-op outside agterm, the known limit of a main-session gap past 20 minutes and the crash bound (a background wait that outlives a crash keeps the line until it ends, plus 20 minutes); and the command list in `AGENTS.md`; verify `grep -n 'autopilot on' README.md AGENTS.md` finds both
+
+## 7. Integration
+
+- [ ] 7.1 Run the quality gates and verify they pass: `go build -o .bin/agk ./cmd/agk`, `go vet ./...`, `go test ./...`, `openspec validate autopilot-marker --strict`

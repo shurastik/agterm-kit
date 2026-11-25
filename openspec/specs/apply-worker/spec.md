@@ -33,7 +33,7 @@ Each `agk apply start` SHALL create a new run directory `.agk/applies/<timestamp
 - **THEN** the command exits 1 with openspec's error on stderr
 
 ### Requirement: Applier companion inside agterm
-Inside agterm, `agk apply start` SHALL create a background companion of the current session named `<change> · <harness>-apply r1`, running the configured harness interactively in the root the applier works in, with the first round started by a single-line instruction to read `rounds/1/prompt.md`. It SHALL print `{"companion": "<id>", "dir": "<run dir>", "started": <bool>, "worktree": <path or null>, "pulled": <bool>}` and exit 0.
+Inside agterm, `agk apply start` SHALL create a background companion of the current session named `<change> · <harness>-apply r1`, prefixed with `🤖 ` for a run started with `--autopilot` (see the `autopilot-marker` capability), running the configured harness interactively in the root the applier works in, with the first round started by a single-line instruction to read `rounds/1/prompt.md`. It SHALL print `{"companion": "<id>", "dir": "<run dir>", "started": <bool>, "worktree": <path or null>, "pulled": <bool>}` and exit 0.
 
 #### Scenario: Claude applier starts
 - **GIVEN** the applier resolves to `claude` and worktree mode is off
@@ -44,6 +44,11 @@ Inside agterm, `agk apply start` SHALL create a background companion of the curr
 - **GIVEN** worktree mode and the applier resolving to `claude`
 - **WHEN** the agent in session S runs `agk apply start add-auth` from the main checkout
 - **THEN** the companion is named `add-auth · claude-apply r1`, its working directory is `.worktrees/add-auth`, and stdout carries `"worktree"` with the absolute path of `.worktrees/add-auth`
+
+#### Scenario: Autopilot applier starts
+- **GIVEN** the applier resolves to `claude`
+- **WHEN** the agent in session S runs `agk apply start add-auth --autopilot`
+- **THEN** the companion under S is named `🤖 add-auth · claude-apply r1` and stdout has the same fields as without the flag
 
 #### Scenario: Agent session keeps its name
 - **GIVEN** the agent runs in agterm session S
@@ -309,12 +314,17 @@ After typing a round line into the applier, agk SHALL wait up to 10 seconds for 
 - **THEN** agk types no Enter, after the 30-second handshake stdout carries `"started": false`, and the stderr warning tells the user to look at the companion, without advising to press Enter
 
 ### Requirement: Applier companion renamed for each round
-Once `agk apply send` has typed round k+1 into the applier companion, it SHALL rename the companion to `<change> · <harness>-apply r<k+1>`. A failed rename SHALL be a warning on stderr and SHALL NOT change the command's stdout or exit code. A round that was not typed (busy, permission prompt, gone) SHALL NOT rename it.
+Once `agk apply send` has typed round k+1 into the applier companion, it SHALL rename the companion to the name `agk apply start` gives it with `r<k+1>` in place of `r1`: `<change> · <harness>-apply r<k+1>`, prefixed with `🤖 ` for an autopilot run. A failed rename SHALL be a warning on stderr and SHALL NOT change the command's stdout or exit code. A round that was not typed (busy, permission prompt, gone) SHALL NOT rename it.
 
 #### Scenario: Findings round renames the applier
 - **GIVEN** apply run D of `add-auth` with companion `add-auth · claude-apply r1` that finished round 1 with `done`
 - **WHEN** the agent runs `agk apply send D findings.md`
 - **THEN** after the line for round 2 is typed, the companion is named `add-auth · claude-apply r2`
+
+#### Scenario: Autopilot applier renamed
+- **GIVEN** autopilot apply run D of `add-auth` with companion `🤖 add-auth · claude-apply r1` that finished round 1 with `done`
+- **WHEN** the agent runs `agk apply send D findings.md`
+- **THEN** after the line for round 2 is typed, the companion is named `🤖 add-auth · claude-apply r2`
 
 #### Scenario: Unconfirmed round still renames
 - **GIVEN** the applier of D does not report round 2 as started after the line is typed

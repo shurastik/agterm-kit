@@ -75,7 +75,7 @@ When `AGTERM_ENABLED` and `AGTERM_SESSION_ID` are set, `agk review start` SHALL 
 - `<change> · <harness>-review r1` for a diff review started with `--for <change>`;
 - `<harness>-review r1` for a diff review without `--for`.
 
-The companion is created in the background without changing the selected session. It SHALL run the reviewer harness interactively, and round 1 SHALL be started by a single line telling the reviewer to read `rounds/1/prompt.md`. The command SHALL print one JSON object `{"companion": "<id>", "dir": "<run dir>", "started": <bool>}` on stdout and exit 0 without waiting for the review.
+A run started with `--autopilot` SHALL prefix that name with `🤖 ` (see the `autopilot-marker` capability). The companion is created in the background without changing the selected session. It SHALL run the reviewer harness interactively, and round 1 SHALL be started by a single line telling the reviewer to read `rounds/1/prompt.md`. The command SHALL print one JSON object `{"companion": "<id>", "dir": "<run dir>", "started": <bool>}` on stdout and exit 0 without waiting for the review.
 
 #### Scenario: Companion appears under the agent session
 - **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `codex`
@@ -91,6 +91,11 @@ The companion is created in the background without changing the selected session
 - **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `claude`
 - **WHEN** it runs `agk review start --change add-auth`
 - **THEN** the companion under S is named `add-auth · claude-plan r1`
+
+#### Scenario: Autopilot diff review
+- **GIVEN** the agent runs inside agterm session S and the reviewer resolves to `codex`
+- **WHEN** it runs `agk review start --base main --for add-auth --autopilot`
+- **THEN** the companion under S is named `🤖 add-auth · codex-review r1`
 
 #### Scenario: No run number in the name
 - **GIVEN** a repository with seven earlier run directories under `.agk/reviews/`
@@ -756,7 +761,7 @@ After typing a round or fix-up line into the reviewer, agk SHALL wait up to 10 s
 - **THEN** the command exits 1 saying `--for` and `--change` exclude each other, and no run directory or companion is created
 
 ### Requirement: Reviewer companion renamed for each round
-Once `agk review send` has typed round k+1 into the reviewer companion, it SHALL rename the companion to the name `agk review start` gives it with `r<k+1>` in place of `r1`. A failed rename SHALL be a warning on stderr and SHALL NOT change the command's stdout or exit code. A round that was not typed (busy, permission prompt, gone) SHALL NOT rename it.
+Once `agk review send` has typed round k+1 into the reviewer companion, it SHALL rename the companion to the name `agk review start` gives it with `r<k+1>` in place of `r1`, the `🤖 ` prefix of an autopilot run included. A failed rename SHALL be a warning on stderr and SHALL NOT change the command's stdout or exit code. A round that was not typed (busy, permission prompt, gone) SHALL NOT rename it.
 
 #### Scenario: Second round renames the companion
 - **GIVEN** review run D of `add-auth` with companion `add-auth · codex-review r1` whose round 1 completed
@@ -767,6 +772,11 @@ Once `agk review send` has typed round k+1 into the reviewer companion, it SHALL
 - **GIVEN** plan review run D of `add-x` with companion `add-x · claude-plan r2` whose round 2 completed
 - **WHEN** the agent runs `agk review send D`
 - **THEN** the companion is named `add-x · claude-plan r3`
+
+#### Scenario: Autopilot plan review renamed
+- **GIVEN** autopilot plan review run D of `add-x` with companion `🤖 add-x · claude-plan r2` whose round 2 completed
+- **WHEN** the agent runs `agk review send D`
+- **THEN** the companion is named `🤖 add-x · claude-plan r3`
 
 #### Scenario: Unconfirmed round still renames
 - **GIVEN** the reviewer of D does not report round 2 as started after the line is typed
